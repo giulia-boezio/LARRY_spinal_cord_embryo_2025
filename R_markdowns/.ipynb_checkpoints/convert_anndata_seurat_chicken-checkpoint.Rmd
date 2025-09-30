@@ -1,0 +1,82 @@
+---
+title: "convert_anndata_seurat"
+output: html_document
+date: '2025-04-24'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+
+
+```{r libraries}
+library(Seurat)
+library(tidyverse)
+library(Matrix)
+```
+
+## Paths
+
+```{r paths}
+anndata_seurat_path = "/camp/home/depottj/working/depottj/projects/briscoej/giulia.boezio/LARRY_spinal_cord/data/anndata_seurat"
+seurat_path = "/camp/home/depottj/working/depottj/projects/briscoej/giulia.boezio/LARRY_spinal_cord/data/seurat"
+```
+
+## Make Seurat object
+
+```{r make_seurat_object}
+file_name = "chicken"
+
+#Read in Count matrix
+counts <- readMM(file.path(anndata_seurat_path , str_c("preprocessing_larry_" , file_name , "_matrix.mtx")))
+
+#Read in gene names
+gene_names <- read.csv(file.path(anndata_seurat_path , str_c("preprocessing_larry_" , file_name , "_genes.csv")))[["Gene"]]
+
+#Read in cell names
+cell_names <- read.csv(file.path(anndata_seurat_path , str_c("preprocessing_larry_" , file_name , "_cells.csv")))[["Cells"]]
+
+
+colnames(counts) <- gene_names
+rownames(counts) <- cell_names
+
+seurat_obj <- CreateSeuratObject(counts = t(counts))
+```
+
+```{r}
+#Read in meta data
+meta_data <- read_csv(file.path(anndata_seurat_path , str_c("preprocessing_larry_" , file_name , "_meta.csv"))) %>%
+              column_to_rownames(var = "index")
+
+seurat_obj@meta.data <- meta_data
+```
+
+```{r normalise_scale}
+seurat_obj_norm_scale <- seurat_obj %>%
+  NormalizeData(normalization.method = "LogNormalize" , scale.factor = 10000) %>%
+  ScaleData()
+```
+```{r umap}
+umap_coord <- read_csv(file.path(anndata_seurat_path , str_c("preprocessing_larry_" , file_name , "_umap.csv")), col_names = FALSE)
+colnames(umap_coord) <- c("UMAP_1","UMAP_2","UMAP_3")
+rownames(umap_coord) <- cell_names
+
+#Make umap to matrix
+umap_matrix <- as.matrix(umap_coord)
+
+#Create Reduction object
+umap_reduc <- CreateDimReducObject(embeddings = umap_matrix, key = "UMAP_", assay = DefaultAssay(seurat_obj_norm_scale))
+
+#Add umap to Seurat object
+seurat_obj_norm_scale[["umap"]] <- umap_reduc
+
+DimPlot(seurat_obj_norm_scale, reduction = "umap", group.by = "wave")
+DimPlot(seurat_obj_norm_scale, reduction = "umap", group.by = "cell_type")
+```
+
+```{r write_wout}
+saveRDS(seurat_obj_norm_scale, file = file.path(seurat_path , str_c("preprocessing_larry_" , file_name , "_clusters_newwave.rds")))
+
+```

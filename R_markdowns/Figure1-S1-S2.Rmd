@@ -1,0 +1,1120 @@
+---
+title: "Figure_1_plots"
+output: html_document
+date: "2025-01-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Libraries
+```{r init}
+library(dplyr)
+library(Seurat)
+library(readr)
+library(tidyverse)
+library(scCustomize)
+library(ggplot2)
+library(ggrepel)
+
+```
+
+#Color palettes
+```{r}
+
+mycolors <- c(
+  "dodgerblue2",
+  "darkgreen",
+  "#FF7F00", # orange
+  "#6A3D9A", # purple
+  "skyblue2", 
+  "black", 
+  "#E31A1C", # red
+  "yellow",
+  "#FB9A99", # lt pink
+  "palegreen3",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "forestgreen", 
+  "khaki2",
+  "maroon", 
+  "orchid1", 
+  "deeppink1", 
+  "darkblue", 
+  "steelblue4",
+  "green",
+  "sienna",
+  "turquoise",
+  "tan",
+  "darkolivegreen",
+  "darkolivegreen1"
+)
+
+pie(rep(1, 25), col = mycolors)
+
+
+
+colors = c("darkblue", "forestgreen", "deeppink1" )
+
+cols_clones = c("darkblue", "forestgreen", "orchid1", "black", "#FF7F00" )
+
+
+cols_clones <- DiscretePalette(50, palette = "alphabet2")
+
+pie(rep(1, 25), col = cols_clones)
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown", "darkblue"
+)
+
+
+
+```
+
+#PATHS
+```{r}
+
+
+plots = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure1/" 
+
+data = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/data/"
+
+
+```
+
+#Read rds 
+```{r}
+seur_obj <- read_rds("/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/data/cleaned_integrated_JD/preprocessing_larry_chicken_clusters_newwave.rds")
+
+
+colnames(seur_obj@meta.data)[colnames(seur_obj@meta.data) == "cell_type"] <- "Cell.type"
+
+colnames(seur_obj@meta.data)[colnames(seur_obj@meta.data) == "clone"] <- "exp_clone"
+
+# Column 1: "experiment"
+seur_obj@meta.data$experiment <- case_when(
+  seur_obj@meta.data$sample %in% c("BOE5073A1", "BOE5073A2", "BOE5073A3", "BOE5073A4") ~ "HH28",
+  seur_obj@meta.data$sample %in% c("BOE5073A5", "BOE5073A6", "BOE5073A7", "BOE5073A8",
+                                   "BOE5073A9", "BOE5073A10", "BOE5073A11") ~ "HH35",
+  seur_obj@meta.data$sample %in% c("BOE5073A13", "BOE5073A14", "BOE5073A15", "BOE5073A16",
+                                   "BOE5073A17", "BOE5073A18", "BOE5073A19", "BOE5073A20") ~ "HH31",
+  TRUE ~ NA_character_
+)
+
+# Column 2: "samples_LARRY"
+seur_obj@meta.data$samples_LARRY <- case_when(
+  seur_obj@meta.data$sample %in% c("BOE5073A1", "BOE5073A2", "BOE5073A3", "BOE5073A4",
+                                   "BOE5073A6", "BOE5073A7", "BOE5073A8", "BOE5073A9",
+                                   "BOE5073A10", "BOE5073A11", "BOE5073A14", "BOE5073A15",
+                                   "BOE5073A16", "BOE5073A17", "BOE5073A18", "BOE5073A19", "BOE5073A20") ~ "LARRY",
+  seur_obj@meta.data$sample %in% c("BOE5073A5", "BOE5073A13") ~ "control",
+  TRUE ~ NA_character_
+)
+
+seur_obj@meta.data <- seur_obj@meta.data %>%
+  mutate(clone_id_detected = case_when(
+    experiment %in% c("HH28", "HH31", "HH35") & !is.na(exp_clone) ~ "detected",
+    experiment %in% c("HH28", "HH31", "HH35") & is.na(exp_clone) ~ "not_detected",
+    TRUE ~ NA_character_
+  ))
+
+seur_obj@meta.data$Cell.type <- seur_obj@meta.data$Cell.type %>%
+  recode("Immature neurons" = "immature neurons") %>%
+  replace_na("Unknown")
+
+
+### Clone size
+# Step 1: Compute clone sizes from exp_clone
+clone_sizes <- seur_obj@meta.data %>%
+  filter(!is.na(exp_clone)) %>%
+  count(exp_clone, name = "clone_size")
+
+# Step 2: Join clone sizes back to meta.data safely
+meta_with_clone_status <- seur_obj@meta.data %>%
+  left_join(clone_sizes, by = "exp_clone") %>%
+  mutate(multi_cell_clone = case_when(
+    clone_size > 1 ~ "multi-cell_clone",
+    clone_size == 1 ~ "single-cell_clone",
+    TRUE ~ NA_character_  # keep NA where no exp_clone
+  ))
+
+# Ensure rownames are preserved
+rownames(meta_with_clone_status) <- rownames(seur_obj@meta.data)
+
+# Step 4: Add the new column to the Seurat object
+seur_obj <- AddMetaData(seur_obj, metadata = meta_with_clone_status$multi_cell_clone, col.name = "multi_cell_clone")
+
+
+
+```
+
+
+```{r}
+# Save RDS SO subsetted with new experiment names
+
+saveRDS(seur_obj, file = file.path(data, "July2025_SO_subset_new_curated.Rds"))
+```
+
+
+#Set new colors
+```{r}
+
+celltype_order <- c("RP", "dp1_2", "dpL", "dp6", "p0", "p1", "p2", "pMN", "p3" , "FP", "OPCs", "immature neurons", "dI1", "dI2","dI3","dI4_dILA", "dI5_dILB", "Immature V0-dI6-V1", "dI6", "V0", "V1", "V2a", "V2b", "MN", "V3", "Unknown")
+
+
+colors_ids_fine <- c(
+              "lightskyblue", #RP
+                     "deepskyblue", # dp1_2 
+                       "deepskyblue3", #dpL
+              "turquoise3", # dp6
+                     "darkblue", # p0
+                     "deepskyblue4", # p1
+       "midnightblue", # p2
+              "dodgerblue4", #pMN
+              "blue", #p3
+       "dodgerblue3",  #FP 
+              "darkorchid4", # OPCs 
+              "darkolivegreen1", #immature
+              "wheat2",#dI1
+                     "khaki", #dI2      
+              "gold1" ,#dI3 
+       "goldenrod2", #dI4_dILA
+              "darkgoldenrod1", #dI5_dILB 
+              "darkolivegreen2", #immature v0 etc
+              "darkolivegreen3", #dI6 
+              "limegreen", #V0
+              "palegreen3", # V1
+              "darkseagreen", #V2a
+              "chartreuse3", #"V2b
+              "darkgreen", #MN
+              "seagreen", #V3
+       "grey95" #Unknwon
+  )
+
+# Create a named vector for colors
+cell_type_colors <- setNames(colors_ids_fine, celltype_order)
+
+```
+
+#UMAPs (Fig.1D)
+```{r fig.height=16, fig.width=20}
+
+
+#Plot for normal UMAP with cell type names
+
+
+# Ensure Cell.type follows the specified order
+seur_obj$Cell.type <- factor(seur_obj$Cell.type, levels = celltype_order)
+seur_obj <- SetIdent(seur_obj, value = seur_obj@meta.data$Cell.type)
+
+
+#with degrading colours
+DimPlot(seur_obj,
+            label = F,
+        pt.size = 1,
+        repel = T,
+        dims = c(1, 3)
+        ) +
+      # NoLegend() +
+      coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL) +
+      scale_color_manual(values = cell_type_colors) +
+      guides(color = guide_legend(override.aes = list(size = 4))) + # Adjust legend appearance if needed
+      theme(
+        legend.position = "right",  # Forces legend to stay in a fixed position
+        legend.key.size = unit(0.5, "cm"),  # Standardize legend key size
+        legend.text = element_text(size = 12)  # Standardize legend text size
+      ) 
+
+
+ggsave(filename = "umap-sub-colors-fine-degrading-legend-dim13.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 45 ,
+    height = 40, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+
+
+#With other colours
+c25 <- c(
+  "dodgerblue2", "#E31A1C",# red
+  "green4","deeppink1", 
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon",  "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown", "darkblue", "magenta4") 
+
+DimPlot(seur_obj,
+            label = F ,
+        dims = c(1,3),
+        pt.size = 1,
+        label.size = 6,
+        cols = c25,
+        repel = T
+        ) +
+        labs(title = NULL) +  # Removes title
+      # NoLegend()+
+      coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL)
+
+ggsave(filename = "UMAP-dim12-celltypes.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 37 ,
+    height = 37, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+
+
+```
+
+#UMAP by experiment Fig.1E
+```{r}
+
+colors <- c("#7F7FFF", "#7FBF7F", "#FF7F7F")
+
+seur_obj$experiment <- factor(seur_obj$experiment, levels = c("HH28", "HH31",  "HH35"))
+
+DimPlot(seur_obj,
+            label = F,
+        group.by = "experiment",
+        shuffle = T,
+        pt.size= 1, 
+        cols = colors,
+        repel = T
+        ) +
+      labs(title = NULL) +  # Removes title
+      coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL) +
+      guides(color = guide_legend(override.aes = list(size = 4))) + # Adjust legend appearance if needed
+      theme(
+        legend.position = "right",  # Forces legend to stay in a fixed position
+        legend.key.size = unit(0.5, "cm"),  # Standardize legend key size
+        legend.text = element_text(size = 12)  # Standardize legend text size
+      ) +
+  NoLegend()
+
+ggsave(filename = "UMAP_samples_colors-nolegend.png", plot = last_plot(), path = plots,
+    scale = 1, width = 23 ,
+    height = 23, units = "cm",
+    dpi = 300, bg = "transparent")
+
+#UMAP by experiment
+
+DimPlot(seur_obj,
+            label = F,
+        group.by = "experiment",
+        split.by = "experiment",
+        shuffle = T,
+        pt.size= 1, 
+        cols = colors,
+        repel = T
+        ) +
+      labs(title = NULL) +  # Removes title
+      coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL) +
+      guides(color = guide_legend(override.aes = list(size = 4))) + # Adjust legend appearance if needed
+      theme(
+        legend.position = "right",  # Forces legend to stay in a fixed position
+        legend.key.size = unit(0.5, "cm"),  # Standardize legend key size
+        legend.text = element_text(size = 12)  # Standardize legend text size
+      )
+
+ggsave(filename = "UMAP_samples_colors_split.png", plot = last_plot(), path = plots,
+    scale = 1, width = 37 ,
+    height = 23, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+
+
+
+#UMAPS clones fig1F/G
+```{r}
+Meta_Highlight_Plot(seurat_object = seur_obj,pt.size = 1.5, meta_data_column = "clone_id_detected",
+    meta_data_highlight = c("not_detected","detected"), 
+    highlight_color = c(  "darkcyan","#E8997A", "grey90"),
+    background_color = "grey90")+
+        coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL)+
+      guides(color = guide_legend(override.aes = list(size = 4))) + # Adjust legend appearance if needed
+      theme(
+        legend.position = "right",  # Forces legend to stay in a fixed position
+        legend.key.size = unit(0.5, "cm"),  # Standardize legend key size
+        legend.text = element_text(size = 12)  # Standardize legend text size
+      ) +
+  NoLegend()
+ggsave(filename = "clone_detected-noledeng.png", plot = last_plot(), path = plots,
+    scale = 1, width = 23 ,
+    height = 23, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+#Plot clones detected and multicell clones over umap
+
+DimPlot(seur_obj, 
+        pt.size= 1, 
+        cols = c("multi-cell_clone" = "darkblue", "single-cell_clone" = "red"), 
+        # shuffle = T,
+        order = T,
+        na.value = "grey95",
+        group.by = "multi_cell_clone") +
+      labs(title = NULL) +  # Removes title
+      coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL) +
+      guides(color = guide_legend(override.aes = list(size = 4))) + # Adjust legend appearance if needed
+      theme(
+        legend.position = "right",  # Forces legend to stay in a fixed position
+        legend.key.size = unit(0.5, "cm"),  # Standardize legend key size
+        legend.text = element_text(size = 12)  # Standardize legend text size
+      )+
+  NoLegend()
+
+
+ggsave(filename = "multicellular_clones-nolegend.png", plot = last_plot(), path = plots,
+    scale = 1, width = 23 ,
+    height = 23, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+#Upset plot 1H
+```{r}
+seur_obj@meta.data <- seur_obj@meta.data %>%
+  mutate(cell_category = case_when(
+    Cell.type %in% c("RP", "dp1_2", "dpL", "dp6", "p0", "p1", "p2", "pMN", "p3", "FP") ~ "Neural Progenitors",
+    Cell.type %in% c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6", "V0", "V1", "V2a", "V2b", "MN", "V3", "immature neurons","Immature V0-dI6-V1" ) ~ "Neurons",
+    Cell.type %in% c("OPCs") ~ "Glia"
+  ))
+
+table(seur_obj@meta.data$cell_category)
+
+
+
+library(ComplexUpset)
+
+upset_df <- seur_obj@meta.data %>%
+  filter(
+    !is.na(exp_clone),
+    !is.na(cell_category),
+    multi_cell_clone == "multi-cell_clone"
+  ) %>%
+  distinct(exp_clone, cell_category) %>%
+  mutate(present = 1) %>%
+  pivot_wider(
+    names_from = cell_category,
+    values_from = present,
+    values_fill = list(present = 0)
+  )
+
+
+# Plot with custom color palette and clean theme
+
+upset(
+  upset_df,
+  intersect = c("Glia", "Neurons", "Neural Progenitors"),  # Custom order
+  name = "Clonal Sharing",
+  set_sizes = FALSE,
+  base_annotations = list(
+    'Intersection size' = intersection_size()
+  )
+)
+
+
+ggsave(filename = "Upset_plots_broad_cat.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 20 ,
+    height = 17, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+
+```
+
+
+
+#SUPPLEMENTARY
+#FeaturePlots
+```{r}
+##Featureplot multiple features in loop
+
+
+markers = c("OLIG2", "SOX2", "NKX6-2", "PAX6", "PAX7", "PDGFRA", "GFAP", "FOXJ1", "SLC17A6", "SLC32A1", "GAD1",  "SLC6A5")
+markers = c("PAX2", "GATA3", "GATA2", "EN1", "EVX1", "VSX2", "SIM1")
+# markers = c("EN1", "MAFB", "MAFA", "ONECUT1", "ZFHX3", "ZFHX4", "NEUROD2", "NFIA", "NURR1", "FOXP1", "FOXP2", "VSX2")
+
+markers = c("FOXD3")
+
+
+for (gene in markers){
+      ID = seur_obj@misc$gene_to_symbol %>% filter(gene_name == gene) %>% pull(gene_id)
+
+  # Skip if not found
+  if (length(ID) == 0) {
+    warning(paste("Gene not found:", gene_symbol))
+    next
+  }
+      #Featureplot
+      
+      p <- FeaturePlot(seur_obj, 
+                  reduction = "scVI_umap",
+                  features = ID, 
+                  pt.size = 0.7,
+                  min.cutoff = "q10", max.cutoff = "q100", 
+                  # cols = viridis_plasma_light_high,
+                  # cols = c("darkblue", "red"),
+                  order = TRUE) +
+            scale_x_discrete(breaks = NULL) +
+            scale_y_discrete(breaks = NULL) +
+            labs(title = paste0( gene, " expressing cells"))
+      
+      ggsave(filename = paste0(gene, "_q10-100Featureplot.png"), plot = last_plot(), path = plots,
+          scale = 1, width = 17,
+          height = 16, units = "cm",
+          dpi = 300, bg = "transparent")
+}
+
+######
+
+#If you have the gene names directly:
+
+for (gene in markers) {
+  # Try to generate and save the plot
+  tryCatch({
+    # Generate the plot
+    p <- FeaturePlot(seur_obj, features = gene, 
+                     dims = c(1, 3),
+                     min.cutoff = "q5", max.cutoff = "q90", 
+                     cols = c("grey80", "dodgerblue4"), 
+                     order = TRUE) +
+         scale_x_discrete(breaks = NULL) +
+         scale_y_discrete(breaks = NULL) +
+         labs(title = paste0(gene, " expressing cells"))
+
+    print(p)  # Ensure the plot is evaluated
+
+    # Save the plot
+    ggsave(
+      filename = paste0(gene, "_q5q90Featureplot-dims1-3.png"),
+      plot = p,
+      path = plots,
+      scale = 1,
+      width = 17,
+      height = 16,
+      units = "cm",
+      dpi = 300,
+      bg = "transparent"
+    )
+  },
+  error = function(e) {
+    message(paste("Skipping", gene, "– not found or plot failed."))
+  })
+}
+
+
+```
+
+#Genes across timepoints VlnPlots
+```{r}
+# Your list of gene symbols
+gene_symbols <- c("FOXJ1", "GFAP")  
+
+# Loop through each gene
+for (gene_symbol in gene_symbols) {
+
+  # Generate the violin plot with box overlay
+  p <- VlnPlot(seur_obj,
+               features = gene_symbol,  # use symbol directly
+               group.by = "experiment",
+               pt.size = 0.5) +
+    geom_boxplot(width = 0.1, outlier.shape = NA) +
+    theme_minimal() +
+    ggtitle(gene_symbol) +
+    NoLegend()
+
+  # Save the plot
+  ggsave(filename = paste0(gene_symbol, "_vlnplot.pdf"),
+         plot = p,
+         path = plots,  # make sure 'plots' exists or define it
+         scale = 1,
+         width = 17,
+         height = 16,
+         units = "cm",
+         dpi = 300,
+         bg = "transparent")
+}
+
+
+```
+#Dotplots genes
+##Progenitors
+```{r}
+
+# Define your gene symbols
+genes_progenitors <- c(
+  "SOX2", "LMX1A", "MSX1",  "PAX3", "WNT1", "OLIG3", "IRX3", "PAX7", "PAX6", 
+  "GSX2", "ASCL1", "GBX1", "PTF1A", "DBX2",
+  "SP8", "PRDM12", "NKX6-2", "OLIG2", "NKX2-2", "FOXA2", 
+  "ARX", "SHH")
+
+# Convert to ENSEMBL IDs (if needed)
+# gene_lookup <- seur_obj@misc$gene_to_symbol %>% filter(gene_name %in% genes_progenitors)
+# gene_ids <- gene_lookup$gene_id
+# names(gene_ids) <- gene_lookup$gene_name
+# gene_ids <- gene_ids[genes_progenitors]
+
+
+# Set identity to Cell.type (if not already)
+seur_obj$Cell.type <- factor(seur_obj$Cell.type, levels = rev(celltype_order))
+Idents(seur_obj) <- "Cell.type"
+
+
+
+
+# Plot
+DotPlot(seur_obj,
+        features = genes_progenitors,
+        dot.scale = 6) +  # controls max dot size
+  scale_color_viridis_c(option = "cividis") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_text(face = "bold")
+  ) +
+  labs(
+    x = "Cell Type",
+    y = NULL,
+    size = "% Expressing",
+    color = "Avg Expr"
+  )
+
+ggsave(filename = "dotplot_Delile_prog_genes.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 22 ,
+    height = 15, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+
+##Neurons
+```{r}
+
+genes_neurons <- c(
+  "TUBB3", "LHX2", "LHX9", "BARHL1","BARHL2",
+  "LHX1", "LHX5", "ISL1",  "LBX1",
+  "PAX2", "GBX1", "TLX3", "LMX1B", "WT1", "DMRT1", "IRX1", "IRX2", "EVX1", "EVX2", "PITX2", "EN1", "LHX3",
+  "VSX2", "SOX14", "VSX1", "TAL1", "GATA2", "GATA3",
+   "MNX1",  "ISL2","SLC10A4", "SLC18A3",  "ALDH1A2",
+  "OLIG3", "SIM1","NKX2-2", "OLIG2", "PDGFRA", "SOX10"  
+)
+
+celltype_order_neurons <- c("RP", "dp1_2", "dpL", "dp6", "p0", "p1", "p2", "pMN", "p3" , "FP", "Unknown", "immature neurons", "Immature V0-dI6-V1", "dI1", "dI2","dI3","dI4_dILA", "dI5_dILB", "dI6", "V0", "V1", "V2a", "V2b", "MN", "V3", "OPCs")
+
+# Set identity to Cell.type (if not already)
+seur_obj$Cell.type <- factor(seur_obj$Cell.type, levels = rev(celltype_order_neurons))
+Idents(seur_obj) <- "Cell.type"
+
+DotPlot(seur_obj,
+        features = genes_neurons,
+        dot.scale = 6) +  # controls max dot size
+  scale_color_viridis_c(option = "cividis") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_text(face = "bold")
+  ) +
+  labs(
+    x = "Cell Type",
+    y = NULL,
+    size = "% Expressing",
+    color = "Avg Expr"
+  )
+
+ggsave(filename = "dotplot_Delile_neurons_genes.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 24 ,
+    height = 16, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+
+#####
+
+#FIG.S2
+## Multicell clones UMAPs Fig.S2C
+#Pie chart number of cells in multicellular clones
+```{r}
+# Step 1: Prepare data (removing NA)
+clone_counts <- seur_obj@meta.data %>%
+  filter(!is.na(multi_cell_clone)) %>%
+  count(multi_cell_clone) %>%
+  mutate(
+    per = round(n / sum(n) * 100, 1),
+    label = paste0(per, "%")
+  )
+
+# Step 2: Plot
+ggplot(data = clone_counts) +
+  geom_bar(aes(x = "", y = per, fill = multi_cell_clone), stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  geom_text(aes(x = 1, y = cumsum(per) - per / 2, label = label), color = "white", size = 6) +
+  scale_fill_manual(
+    labels = c("Multicellular clones", "Single-cell clones"),
+    name = NULL,
+    values = c("multi-cell_clone" = "blue", "single-cell_clone" = "red")
+  )
+
+# Step 3: Save plot
+ggsave(
+  filename = "multicell_clones_cells_pie.pdf",
+  plot = last_plot(),
+  path = plots,
+  scale = 1,
+  width = 26,
+  height = 15,
+  units = "cm",
+  dpi = 300,
+  bg = "transparent"
+)
+```
+
+#Pie chart number of multicell clones
+```{r}
+# Step 1: Filter out NA exp_clone values and group by multi_cell_clone
+clone_summary <- seur_obj@meta.data %>%
+  filter(!is.na(multi_cell_clone), !is.na(exp_clone)) %>%
+  group_by(multi_cell_clone) %>%
+  summarise(n_clones = n_distinct(exp_clone)) %>%
+  ungroup()
+
+print(clone_summary)
+
+
+# Add percentages and labels
+clone_summary <- clone_summary %>%
+  mutate(
+    per = round(n_clones / sum(n_clones) * 100, 1),
+    label = paste0(per, "%")
+  )
+
+# Plot
+ggplot(data = clone_summary) +
+  geom_bar(aes(x = "", y = per, fill = multi_cell_clone), stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  geom_text(aes(x = 1, y = cumsum(per) - per / 2, label = label), color = "white", size = 6) +
+  scale_fill_manual(
+  name = NULL,
+  values = c("multi-cell_clone" = "blue", "single-cell_clone" = "red"),
+  labels = c("multi-cell_clone" = "Multicellular clones", 
+             "single-cell_clone" = "Single-cell clones")
+  )
+
+
+# Save
+ggsave(
+  filename = "multicell_vs_single_clones_count_pie.pdf",
+  plot = last_plot(),
+  path = plots,
+  scale = 1,
+  width = 26,
+  height = 15,
+  units = "cm",
+  dpi = 300,
+  bg = "transparent"
+)
+```
+
+
+#Clonal size
+```{r}
+# Step 1: Prepare clone sizes with experiment info
+clone_sizes <- seur_obj@meta.data %>%
+  filter(!is.na(exp_clone), !is.na(experiment)) %>%
+  group_by(exp_clone) %>%
+  summarise(
+    size = n(),
+    experiment = first(experiment)
+  )
+
+
+# Step 2: Set experiment order manually (HH28, HH31, HH35)
+clone_sizes$experiment <- factor(clone_sizes$experiment, levels = c("HH28", "HH31", "HH35"))
+
+# Step 3: Plot violin plot with custom colors, no points, and median value
+colors <- c("#7F7FFF", "#7FBF7F", "#FF7F7F")
+
+ggplot(clone_sizes, aes(x = experiment, y = size, fill = experiment)) +
+  geom_violin(trim = TRUE, scale = "width", color = NA) +
+  stat_summary(fun = mean, geom = "point", shape = 95, size = 6, color = "black") +
+  stat_summary(fun = mean, geom = "text", aes(label = round(..y.., 2)), 
+               vjust = -1.2, size = 5, color = "black") +
+  scale_fill_manual(values = colors) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Clone Sizes Across Experiments",
+    x = "Experiment",
+    y = "Clone Size (number of cells)"
+  ) +
+  theme(legend.position = "none")
+
+ggsave(filename = "n_cells_all_clones_vln.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 20 ,
+    height = 17, units = "cm",
+    dpi = 300, bg = "transparent")
+  
+  
+  ####
+  
+  # Step 1: Filter to multicellular clones and calculate clone sizes
+clone_sizes_multi <- seur_obj@meta.data %>%
+  filter(
+    !is.na(exp_clone),
+    !is.na(experiment),
+    multi_cell_clone == "multi-cell_clone"
+  ) %>%
+  group_by(exp_clone) %>%
+  summarise(
+    size = n(),
+    experiment = first(experiment)
+  )
+
+# Step 2: Set experiment order manually
+clone_sizes_multi$experiment <- factor(clone_sizes_multi$experiment, levels = c("HH28", "HH31", "HH35"))
+
+# Step 3: Plot
+colors <- c("#7F7FFF", "#7FBF7F", "#FF7F7F")
+
+ggplot(clone_sizes_multi, aes(x = experiment, y = size, fill = experiment)) +
+  geom_violin(trim = TRUE, scale = "width", color = NA) +
+  stat_summary(fun = mean, geom = "point", shape = 95, size = 6, color = "black") +
+  stat_summary(fun = mean, geom = "text", aes(label = round(..y.., 2)), 
+               vjust = -1.2, size = 5, color = "black") +
+  scale_fill_manual(values = colors) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Multicellular Clone Sizes Across Experiments",
+    x = "Experiment",
+    y = "Clone Size (number of cells)"
+  ) +
+  theme(legend.position = "none")+
+ coord_cartesian(ylim = c(1, NA))
+
+
+
+ggsave(filename = "n_cells_multicell_clones_vln.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 20 ,
+    height = 17, units = "cm",
+    dpi = 300, bg = "transparent")
+
+  median_table <- clone_sizes_multi %>%
+  group_by(experiment) %>%
+  summarise(
+    median_clone_size = round(median(size), 2),
+    mean_clone_size = round(mean(size), 2),
+    n_clones = n()
+  )
+  
+```
+
+
+Top 5 clones spanning across cell types
+```{r}
+# Step 1: Summarize clones by number of cell types and total cells
+clones_clusters <- seur_obj@meta.data %>%
+  filter(!is.na(exp_clone), !is.na(Cell.type)) %>%
+  group_by(exp_clone) %>%
+  summarise(
+    nb_clusters = n_distinct(Cell.type),
+    tot_nb_cells = n(),
+    .groups = "drop"
+  )
+
+# Step 2: Select top 5 clones present in >2 cell types and >2 cells
+top5_clones <- clones_clusters %>%
+  filter(nb_clusters > 2, tot_nb_cells > 2) %>%
+  arrange(desc(nb_clusters), desc(tot_nb_cells)) %>%
+  slice_head(n = 5) %>%
+  pull(exp_clone)
+
+# Step 3: Optional — get distribution of cell types for inspection
+top5_clone_celltypes <- seur_obj@meta.data %>%
+  as_tibble(rownames = "cell_id") %>%
+  filter(exp_clone %in% top5_clones) %>%
+  group_by(exp_clone, Cell.type) %>%
+  summarise(n_cells = n(), .groups = "drop") %>%
+  arrange(exp_clone, desc(n_cells))
+
+# Step 4: Extract cell IDs per clone
+cells_in_top5 <- seur_obj@meta.data %>%
+  as_tibble(rownames = "cell_id") %>%
+  filter(exp_clone %in% top5_clones) %>%
+  group_by(exp_clone) %>%
+  group_split() %>%
+  set_names(map_chr(., ~ unique(.x$exp_clone))) %>%
+  map(~ .x$cell_id)
+
+# Step 5: Define highlight colors
+cols_clones <- RColorBrewer::brewer.pal(5, "Set1")
+
+# Step 6: Plot with clones highlighted
+DimPlot(
+  seur_obj,
+  pt.size = 0.7,
+  label = FALSE,
+  cells.highlight = cells_in_top5,
+  cols.highlight = cols_clones,
+  sizes.highlight = 1
+) +
+  labs(title = "Top 5 clones spanning >2 cell types") +
+  theme_classic() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  )
+
+# Step 7: Save (optional)
+ggsave(
+  filename = "top5_clones_more_than_2celltypes.png",
+  plot = last_plot(),
+  path = plots,
+  scale = 1,
+  width = 21,
+  height = 16,
+  units = "cm",
+  dpi = 300,
+  bg = "transparent"
+)
+
+
+```
+
+
+#Upset plot fine
+```{r}
+
+seur_obj@meta.data <- seur_obj@meta.data %>%
+  mutate(cell_category = case_when(
+    Cell.type %in% c("RP", "dp1_2", "dpL", "dp6") ~ "Dorsal Progenitors",
+    Cell.type %in% c("p0", "p1", "p2", "pMN", "p3", "p3_FP", "FP") ~ "Ventral Progenitors",
+    Cell.type %in% c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6") ~ "Dorsal Neurons",
+    Cell.type %in% c("V0", "V1", "V2a", "V2b", "MN", "V3") ~ "Ventral Neurons",
+    Cell.type %in% c("OPCs") ~ "Glia"
+  ))
+
+table(seur_obj@meta.data$cell_category)
+
+
+
+library(ComplexUpset)
+
+upset_df <- seur_obj@meta.data %>%
+  filter(
+    !is.na(exp_clone),
+    !is.na(cell_category),
+    multi_cell_clone == "multi-cell_clone"
+  ) %>%
+  distinct(exp_clone, cell_category) %>%
+  mutate(present = 1) %>%
+  pivot_wider(
+    names_from = cell_category,
+    values_from = present,
+    values_fill = list(present = 0)
+  )
+
+
+# Plot with custom color palette and clean theme
+
+upset(
+  upset_df,
+  intersect = c("Glia", "Dorsal Neurons", "Dorsal Progenitors", "Ventral Neurons", "Ventral Progenitors"),  # Custom order
+  name = "Clonal Sharing",
+  set_sizes = FALSE,
+  base_annotations = list(
+    'Intersection size' = intersection_size()
+  )
+)
+
+
+ggsave(filename = "Upset_plots_DV_cat.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 20 ,
+    height = 17, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+
+
+```
+
+#Clonal size dorsal vs ventral
+##Dataset
+```{r}
+library(dplyr)
+library(ggplot2)
+
+
+# Step 0: Assign DV categories to each cell
+seur_obj@meta.data <- seur_obj@meta.data %>%
+  mutate(cell_category = case_when(
+    Cell.type %in% c("RP", "dp1_2", "dpL", "dp6") ~ "Dorsal Progenitors",
+    Cell.type %in% c("p0", "p1", "p2", "pMN", "p3", "p3_FP", "FP") ~ "Ventral Progenitors",
+    Cell.type %in% c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6") ~ "Dorsal Neurons",
+    Cell.type %in% c("V0", "V1", "V2a", "V2b", "MN", "V3") ~ "Ventral Neurons",
+    Cell.type %in% c("OPCs") ~ "Glia"
+  ))
+
+# Step 1: Select HH28 cells with clone and category info
+hh28_cells <- seur_obj@meta.data %>%
+  filter(experiment == "HH28", !is.na(exp_clone), !is.na(cell_category))
+
+# Step 2: Count categories per clone
+clone_axis_class <- hh28_cells %>%
+  group_by(exp_clone, cell_category) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(exp_clone) %>%
+  mutate(
+    total = sum(n),
+    frac = n / total
+  ) %>%
+  ungroup()
+
+# Step 3: Identify top category/categories per clone
+max_frac <- clone_axis_class %>%
+  group_by(exp_clone) %>%
+  filter(frac == max(frac)) %>%  # keep all top categories
+  ungroup() %>%
+  mutate(axis_group = case_when(
+    cell_category %in% c("Dorsal Progenitors", "Dorsal Neurons") ~ "Dorsal",
+    cell_category %in% c("Ventral Progenitors", "Ventral Neurons") ~ "Ventral",
+    TRUE ~ NA_character_
+  ))
+
+# Step 4: Determine axis identity with mixed detection
+clone_axis_labeled <- max_frac %>%
+  group_by(exp_clone) %>%
+  summarise(
+    n_top_categories = n(),
+    n_axis_groups = n_distinct(axis_group),
+    majority_axis = unique(axis_group)[which.max(tabulate(match(axis_group, unique(axis_group))))]
+  ) %>%
+  mutate(axis = case_when(
+    n_axis_groups > 1 ~ "Mixed",
+    TRUE ~ majority_axis
+  )) %>%
+  select(exp_clone, axis)
+
+# Step 5: Compute clone sizes and merge axis info
+clone_sizes <- hh28_cells %>%
+  group_by(exp_clone) %>%
+  summarise(size = n(), .groups = "drop") %>%
+  left_join(clone_axis_labeled, by = "exp_clone") %>%
+  filter(!is.na(axis), axis != "Mixed")  # Remove missing and mixed clones
+
+# Step 6: Plot
+ggplot(clone_sizes, aes(x = axis, y = size, fill = axis)) +
+  geom_violin(trim = TRUE, scale = "width", color = NA) +
+  stat_summary(fun = mean, geom = "point", shape = 95, size = 6, color = "black") +
+  stat_summary(fun = mean, geom = "text", aes(label = round(..y.., 2)), 
+               vjust = -1.2, size = 5, color = "black") +
+  scale_fill_manual(values = c("Dorsal" = "#5DA5DA", "Ventral" = "#FAA43A")) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Clone Sizes at HH28 by DV Identity",
+    x = " ",
+    y = "Clone Size (number of cells)"
+  ) +
+  theme(legend.position = "none")
+
+# Step 7: Save
+ggsave(
+  filename = "clone_size_HH28_dorsal_ventral.pdf",
+  plot = last_plot(),
+  path = plots,
+  scale = 1, width = 20, height = 17, units = "cm",
+  dpi = 300, bg = "transparent"
+)
+
+
+
+
+```
+
+##Embryos IFs
+```{r}
+
+library(readxl)
+
+# Read the Excel file
+table_df <- read_excel("/Users/boeziog/LARRY_local/Counts-clones_HH28_IFs/counts_clones_HH28.xlsx", sheet = 1)  # Change sheet if needed
+
+table_df <- table_df %>%
+  mutate(clone_name_full = paste0(`name clone`, "_", EMBRYO))
+
+# Calculate clone sizes per clone (using full clone name)
+clone_sizes <- table_df %>%
+  group_by(`clone_name_full`, `D or V`) %>%
+  summarise(size = sum(`N cells`), .groups = "drop")
+
+# Filter out NA values in 'D or V'
+clone_sizes_filtered <- clone_sizes %>%
+  filter(!is.na(`D or V`))
+
+max_y <- max(clone_sizes_filtered$size)
+
+ggplot(clone_sizes_filtered, aes(x = `D or V`, y = size, fill = `D or V`)) +
+  geom_violin(trim = FALSE, scale = "width", color = NA) +
+    geom_point(position = position_dodge(width = 0.5), size = 1.5, color = "black", alpha = 0.6) +
+  stat_summary(fun = mean, geom = "point", shape = 95, size = 6, color = "black") +
+  stat_summary(fun = mean, geom = "text", aes(label = round(..y.., 2)),
+               vjust = -1.2, size = 5, color = "black") +
+  scale_fill_manual(values = c("D" = "#5DA5DA", "V" = "#FAA43A")) +
+
+  # Y-axis with padding to avoid clipping
+  scale_y_continuous(
+    breaks = seq(0, max_y + 5, by = 5),
+    limits = c(0, max_y + 5),
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Clone Sizes at HH28 by DV Identity",
+    x = " ",
+    y = "Clone Size (number of cells)"
+  ) +
+  theme(legend.position = "none")
+
+# Step 5: Save
+ggsave(filename = "EMBRYO_IF_clone_size_HH28_dorsal_ventral.pdf", plot = last_plot(), path = plots,
+       scale = 1, width = 20, height = 17, units = "cm", dpi = 300, bg = "transparent")
+
+
+```
+
+
