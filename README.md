@@ -19,10 +19,10 @@ The Github includes:
 
 ## 📁 Repository structure
 ```
-├── data/              # External data or processed files (not included here)
-├── R_notebooks/         # One RMarkdown notebook per figure+supplementary
+├── metadata/              # metadata files (not included here)
+├── R_markdowns/         # One RMarkdown notebook per figure+supplementary
 ├── Jupyter_notebooks/   # scRNAseq preprocessing and permutation lineage analyses
-├── scripts/           # Python scripts for cESFW and permutation analyses
-├── env/               # Environment files for cESFW and scRNAseq preprocessing/permutation analyses
+├── Python_scripts/           # Python scripts for cESFW and permutation analyses
+├── environments/               # Environment files for cESFW and scRNAseq preprocessing/permutation analyses
 └── README.md          # This file
 ```
