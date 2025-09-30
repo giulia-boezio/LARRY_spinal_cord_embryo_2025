@@ -1,4 +1,4 @@
-# LARRY_spinal_cord_embryo_2025
+# Lineage history organises spinal cord progenitors into hierarchical modules for sensory–motor circuit development
 Scripts for analysis in Boezio et al (2025)
 
 This repository contains the code, data references, and notebooks used in the analyses for the paper:
