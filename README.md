@@ -1,11 +1,11 @@
-# Lineage history organises spinal cord progenitors into hierarchical modules for sensory–motor circuit development
+# Hierarchical lineage architecture of human and avian spinal cord revealed by single-cell genomic barcoding
 Scripts for analysis in Boezio et al (2025)
 
 This repository contains the code, data references, and notebooks used in the analyses for the paper:
 
-**Lineage history organises spinal cord progenitors into hierarchical modules for sensory–motor circuit development**  
+** Hierarchical lineage architecture of human and avian spinal cord revealed by single-cell genomic barcoding**  
 
-Giulia L. M. Boezio, Jasper R. L. Depotter, Tom J. R. Frith, Arthur Radley, Stephanie Strohbuecker, Ana Cunha, Molly Strom, Michael Howell, James Briscoe
+Giulia L. M. Boezio*, Jasper R. L. Depotter, Tom J. R. Frith, Arthur Radley, Stephanie Strohbuecker, Ana Cunha, Michael Howell, James Briscoe*
 
 
 ## 🔍 Overview
