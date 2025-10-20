@@ -1,0 +1,823 @@
+---
+title: "Figure 3"
+output: html_document
+date: "2025-06-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Libraries
+```{r init}
+
+library(dplyr)
+library(Seurat)
+library(readr)
+library(tidyverse)
+library(scCustomize)
+library(ggplot2)
+library(ggrepel)
+library(pheatmap)
+library(tibble)
+
+```
+
+
+#PATHS
+```{r}
+
+
+plots = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure4/" 
+
+data = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/data/"
+
+
+```
+
+#Read rds
+```{r}
+seur_obj <- read_rds("/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/data/cleaned_integrated_JD/preprocessing_larry_chicken_clusters_newwave.rds")
+
+  # seur_obj <- read_rds("/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/data/cleaned_integrated_JD/Feb2025_SO_subset_new_exp_names.Rds")
+
+colnames(seur_obj@meta.data)[colnames(seur_obj@meta.data) == "cell_type"] <- "Cell.type"
+
+colnames(seur_obj@meta.data)[colnames(seur_obj@meta.data) == "clone"] <- "exp_clone"
+
+# Column 1: "experiment"
+seur_obj@meta.data$experiment <- case_when(
+  seur_obj@meta.data$sample %in% c("BOE5073A1", "BOE5073A2", "BOE5073A3", "BOE5073A4") ~ "HH28",
+  seur_obj@meta.data$sample %in% c("BOE5073A5", "BOE5073A6", "BOE5073A7", "BOE5073A8",
+                                   "BOE5073A9", "BOE5073A10", "BOE5073A11") ~ "HH35",
+  seur_obj@meta.data$sample %in% c("BOE5073A13", "BOE5073A14", "BOE5073A15", "BOE5073A16",
+                                   "BOE5073A17", "BOE5073A18", "BOE5073A19", "BOE5073A20") ~ "HH31",
+  TRUE ~ NA_character_
+)
+
+# Column 2: "samples_LARRY"
+seur_obj@meta.data$samples_LARRY <- case_when(
+  seur_obj@meta.data$sample %in% c("BOE5073A1", "BOE5073A2", "BOE5073A3", "BOE5073A4",
+                                   "BOE5073A6", "BOE5073A7", "BOE5073A8", "BOE5073A9",
+                                   "BOE5073A10", "BOE5073A11", "BOE5073A14", "BOE5073A15",
+                                   "BOE5073A16", "BOE5073A17", "BOE5073A18", "BOE5073A19", "BOE5073A20") ~ "LARRY",
+  seur_obj@meta.data$sample %in% c("BOE5073A5", "BOE5073A13") ~ "control",
+  TRUE ~ NA_character_
+)
+
+seur_obj@meta.data <- seur_obj@meta.data %>%
+  mutate(clone_id_detected = case_when(
+    experiment %in% c("HH28", "HH31", "HH35") & !is.na(exp_clone) ~ "detected",
+    experiment %in% c("HH28", "HH31", "HH35") & is.na(exp_clone) ~ "not_detected",
+    TRUE ~ NA_character_
+  ))
+
+seur_obj@meta.data$Cell.type <- seur_obj@meta.data$Cell.type %>%
+  recode("Immature neurons" = "immature neurons") %>%
+  replace_na("Unknown")
+
+
+### Clone size
+# Step 1: Compute clone sizes from exp_clone
+clone_sizes <- seur_obj@meta.data %>%
+  filter(!is.na(exp_clone)) %>%
+  count(exp_clone, name = "clone_size")
+
+# Step 2: Join clone sizes back to meta.data safely
+meta_with_clone_status <- seur_obj@meta.data %>%
+  left_join(clone_sizes, by = "exp_clone") %>%
+  mutate(multi_cell_clone = case_when(
+    clone_size > 1 ~ "multi-cell_clone",
+    clone_size == 1 ~ "single-cell_clone",
+    TRUE ~ NA_character_  # keep NA where no exp_clone
+  ))
+
+# Ensure rownames are preserved
+rownames(meta_with_clone_status) <- rownames(seur_obj@meta.data)
+
+# Step 4: Add the new column to the Seurat object
+seur_obj <- AddMetaData(seur_obj, metadata = meta_with_clone_status$multi_cell_clone, col.name = "multi_cell_clone")
+
+
+
+```
+
+
+#dI4_dI5 UMAP
+```{r}
+
+# Define the clusters for each group
+highlight_clusters_1 <- c("dI4_dILA")  # Replace with your actual cluster names
+highlight_clusters_2 <- c("dI5_dILB")  # Replace with your actual cluster names
+
+# Create a new metadata column for highlighting
+seur_obj@meta.data$highlight <- ifelse(seur_obj@meta.data$`Cell.type` %in% highlight_clusters_1, "dI4_dILA",
+                               ifelse(seur_obj@meta.data$`Cell.type` %in% highlight_clusters_2, "dI5_dILB", "Other"))
+
+DimPlot(seur_obj, dim = c(2,3), group.by = "highlight", cols = c("dI4_dILA" = "#3F7D83", "dI5_dILB" = "#BA600F", "Other" = "grey"))+ 
+  labs(title = NULL) +
+      coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL)
+
+#Save
+ggsave(filename = paste0("dI4_dI5_UMAP-dim2-3", ".png"), plot = last_plot(), path = plots,scale = 1, width = 23 ,
+    height = 20, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+#Percentage dI4/di5 over all
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Define neuron sets
+all_neurons <- c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6", "d", "MN", "V0", "V1", "V2a", "V2b", "V3")
+target_neurons <- c("dI4_dILA", "dI5_dILB")
+
+# Summarize
+neuron_summary <- seur_obj@meta.data %>%
+  filter(Cell.type %in% all_neurons) %>%
+  mutate(group = if_else(Cell.type %in% target_neurons, "dI4_dI5", "Other_Neurons")) %>%
+  count(group) %>%
+  mutate(percentage = round(100 * n / sum(n), 1),
+         label = paste0(group, " (", percentage, "%)"))
+
+# Pie Chart
+ggplot(neuron_summary, aes(x = "", y = n, fill = group)) +
+  geom_col(width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  geom_text(aes(label = label), position = position_stack(vjust = 0.5), size = 5) +
+  scale_fill_manual(values = c(
+  "dI4_dI5" = "#497065",       # Combined group (blend)
+  "Other_Neurons" = "grey80"       # Background comparison
+))+
+  theme_void() +
+  labs(title = "Proportion of dI4/dI5 Neurons")
+
+ggsave(filename = "pie_dI4-5_neurons.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 22 ,
+    height = 12, units = "cm",
+    dpi = 300, bg = "transparent")
+```
+#Circos plot dI4-5
+```{r}
+library(tidyverse)
+library(Seurat)
+
+# Define the neuronal types to include
+neurons <- c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6", 
+             "V0", "V1", "V2a", "V2b", "MN", "V3")
+
+# STEP 2: Subset metadata
+meta <- seur_obj@meta.data %>%
+  rownames_to_column("cell") %>%
+  filter(Cell.type %in% neurons, !is.na(exp_clone), multi_cell_clone == "multi-cell_clone") %>%
+  select(cell, exp_clone, Cell.type)
+
+
+
+# STEP 3: For each clone, find all unique cell types it contains
+clone_celltypes <- meta %>%
+  group_by(exp_clone) %>%
+  summarise(celltypes = list(unique(Cell.type)), .groups = "drop")
+
+# STEP 4: Safely generate all unique cell type pairs per clone
+# This is your list of cell type sets, one per clone
+celltype_lists <- clone_celltypes$celltypes
+
+# Initialize empty list to collect type pairs
+all_type_pairs <- list()
+
+# Loop through each clone's list of cell types
+for (i in seq_along(celltype_lists)) {
+  ct <- sort(celltype_lists[[i]])
+  if (length(ct) >= 2) {
+    pairs <- combn(ct, 2, simplify = FALSE)
+    all_type_pairs <- c(all_type_pairs, pairs)
+  }
+}
+
+
+# STEP 5: Turn into dataframe and count occurrences
+pair_df <- map_dfr(all_type_pairs, ~ tibble(from = .x[1], to = .x[2]))
+pair_counts <- pair_df %>%
+  count(from, to, name = "weight")
+
+# STEP 6: Add diagonals — clones where the same cell type appears more than once
+self_links <- meta %>%
+  group_by(exp_clone, Cell.type) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  filter(n > 1) %>%
+  count(Cell.type, name = "weight") %>%
+  mutate(from = Cell.type, to = Cell.type) %>%
+  select(from, to, weight)
+
+# STEP 7: Combine and create symmetric matrix
+all_links <- bind_rows(pair_counts, self_links)
+
+# Make symmetric: add (to, from)
+sym_links <- bind_rows(
+  all_links,
+  all_links %>% filter(from != to) %>% rename(from = to, to = from)
+)
+
+# STEP 8: Create matrix
+link_matrix <- sym_links %>%
+  pivot_wider(names_from = to, values_from = weight, values_fill = 0) %>%
+  column_to_rownames("from") %>%
+  as.matrix()
+
+# Reorder to match your desired order
+link_matrix <- link_matrix[neurons, neurons]
+
+# STEP 9: Remove lower triangle to avoid double plotting in chordDiagram
+link_matrix[lower.tri(link_matrix)] <- 0
+diag(link_matrix) <- 0
+
+```
+
+```{r}
+# Create a link color matrix — default grey
+link_col_matrix <- matrix("grey90", nrow = nrow(link_matrix), ncol = ncol(link_matrix),
+                          dimnames = dimnames(link_matrix))
+
+# Highlight only dI4_dILA ↔ dI5_dILB links
+link_col_matrix["dI4_dILA", "dI5_dILB"] <- "steelblue"
+link_col_matrix["dI5_dILB", "dI4_dILA"] <- "steelblue"
+# Set up named color vector
+neuron_colors <- setNames(rep("grey85", length(neurons)), neurons)
+neuron_colors["dI4_dILA"] <- "steelblue"
+neuron_colors["dI5_dILB"] <- "steelblue"
+
+# Custom DV order (dorsal to ventral)
+neuron_order <- c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6", 
+                  "V0", "V1", "V2a", "V2b", "MN", "V3")
+
+
+plots <- "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure4/"
+
+# Open PDF device
+pdf(file = file.path(plots, "circos_clonal_dI4_dI5.pdf"), width = 8, height = 8)
+
+# Circos plot code
+circos.clear()
+circos.par(start.degree = 180, clock.wise = T)
+
+chordDiagram(link_matrix,
+             order = neuron_order,
+             grid.col = neuron_colors,
+             col = link_col_matrix,
+             transparency = 0.7,
+             annotationTrack = "grid",
+             preAllocateTracks = list(track.height = 0.05))
+
+circos.track(track.index = 1, panel.fun = function(x, y) {
+  circos.text(CELL_META$xcenter, CELL_META$ylim[1],
+              CELL_META$sector.index,
+              facing = "clockwise", niceFacing = TRUE, adj = c(0, 0.5))
+}, bg.border = NA)
+
+# Close device
+dev.off()
+
+```
+
+
+#dI4-5 ratio inverted median replicates
+```{r}
+
+library(dplyr)
+library(ggplot2)
+
+# Define experiment order
+experiment_order <- c("HH28", "HH31", "HH35")
+
+# Step 1: Compute per-replicate ratios
+replicate_ratios <- seur_obj@meta.data %>%
+  filter(
+    Cell.type %in% c("dI4_dILA", "dI5_dILB")
+    ,
+    clone_id_detected == "detected" #comment out for all cells
+  ) %>%
+  mutate(experiment = factor(experiment, levels = experiment_order)) %>%
+  group_by(experiment, sample, Cell.type) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(experiment, sample) %>%
+  mutate(
+    total = sum(n),
+    ratio = n / total
+  ) %>%
+  ungroup()
+
+# Step 2: Get median and SEM
+summary_ratios <- replicate_ratios %>%
+  group_by(experiment, Cell.type) %>%
+  summarise(
+    median_ratio = median(ratio),
+    sem = sd(ratio) / sqrt(n()),
+    # sd = sd(ratio),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    experiment = factor(experiment, levels = experiment_order),
+    Cell.type = factor(Cell.type, levels = c("dI4_dILA", "dI5_dILB"))  # order: dI4 below
+  ) %>%
+  arrange(experiment, Cell.type)
+
+# Step 3: Compute ymin/ymax manually for stacking
+summary_ratios <- summary_ratios %>%
+  group_by(experiment) %>%
+  mutate(
+    ymin = c(0, median_ratio[1]),
+    ymax = ymin + median_ratio
+  ) %>%
+  ungroup()
+
+# Step 4: Plot
+ggplot(summary_ratios, aes(x = experiment, fill = Cell.type)) +
+  # Manual stacked bars
+  geom_rect(aes(xmin = as.numeric(experiment) - 0.3,
+                xmax = as.numeric(experiment) + 0.3,
+                ymin = ymin,
+                ymax = ymax),
+            color = "black") +
+
+  # Error bars
+   geom_errorbar(
+    data = summary_ratios %>% filter(Cell.type == "dI4_dILA"),
+    aes(
+      x = experiment,
+      ymin = pmax(ymax - sem, 0),
+      ymax = pmin(ymax + sem, 1)
+    ),
+    width = 0.2,
+    color = "black",
+    position = position_identity()
+  ) +
+
+  
+  # Ratio labels
+  geom_text(aes(
+    x = experiment,
+    y = ymin + median_ratio / 2,
+    label = round(median_ratio, 2)
+  ),
+  color = "white",
+  size = 4) +
+
+  # Manual fill colors
+  scale_fill_manual(
+    values = c("dI4_dILA" = "#3F7D83", "dI5_dILB" = "#BA600F"),
+    breaks = c("dI4_dILA", "dI5_dILB")
+  ) +
+
+  # Y axis config
+  scale_y_continuous(
+    limits = c(0, 1),
+    breaks = seq(0, 1, 0.1),
+    expand = c(0, 0)
+  ) +
+
+  # X axis config
+  scale_x_discrete() +
+
+  # Labels and theme
+  labs(
+    title = "Stacked median ratios of dI4 and dI5 in LARRY+ cells",
+    x = NULL,
+    y = "Ratio"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 16, hjust = 0.5, face = "bold", margin = margin(b = 20)),
+    panel.grid.minor.y = element_blank(),
+    legend.title = element_blank(),
+    plot.margin = margin(t = 30, r = 15, b = 15, l = 15)
+  )
+
+
+ggsave(filename = "dI4_dI5_ratio_LARRY_median_replicates.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 17 ,
+    height = 16, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+#Calculate clone size for dI4only and shared clones
+```{r}
+
+# Step 1: Create a new tibble with relevant cell types and information about clones
+#I am now leaving all the cells in there at first and then select later 
+clone_table <- seur_obj@meta.data %>%
+  as_tibble(rownames = "cell_id") %>%  # Convert row names (cell IDs) into a "cell_id" column
+  # filter(Cell.type %in% c("dI4_dILA", "dI5_dILB", "dpL"), !is.na(exp_clone)) %>% # Filter for specific cell types
+  filter(!is.na(exp_clone)) %>%
+  filter(multi_cell_clone == 'multi-cell_clone') %>% #select for multicellular clones
+  select(cell_id, Cell.type, exp_clone, experiment, clone_id_detected, multi_cell_clone)  # Keep relevant columns
+
+# Step2 : Create vectors of exp_clone for dI4_dILA and dI5_dILB, that is important to then select for the clones that contain either only dI4 or dI4 and dI5
+dI4_clones <- unique(clone_table$exp_clone[clone_table$Cell.type == "dI4_dILA"])
+dI5_clones <- unique(clone_table$exp_clone[clone_table$Cell.type == "dI5_dILB"])
+dpL_clones <- unique(clone_table$exp_clone[clone_table$Cell.type == "dpL"])
+
+# Step 3: Add the 'class' column to the clone_table, to then select the classes I care about
+clone_table <- clone_table %>%
+  mutate(
+    class = case_when(
+      exp_clone %in% dI4_clones & !(exp_clone %in% dI5_clones) ~ "dI4_only",   # Only dI4
+      exp_clone %in% dI5_clones & !(exp_clone %in% dI4_clones) ~ "dI5_only",   # Only dI5
+      exp_clone %in% dI4_clones & exp_clone %in% dI5_clones ~ "dI4_dILA|dI5_dILB",  # Shared dI4 and dI5
+      !(exp_clone %in% dI4_clones) & !(exp_clone %in% dI5_clones) & exp_clone %in% dpL_clones ~ "dpL_only",  # Only dpL
+      TRUE ~ "Other"  # For any other cases
+    )
+  )
+```
+
+```{r}
+#Only dI4 and dI4/dI5 clones
+
+# Step 1: Calculate clone sizes
+clone_sizes <- clone_table %>%
+  group_by(exp_clone, experiment, class) %>%
+  summarize(clone_size = n(), .groups = "drop")  # Clone size is the number of cells in each exp_clone
+
+# Step 2: Filter out unwanted classes (dpL_only and dI5_only) and normalize clone sizes
+clone_sizes_filtered2 <- clone_sizes %>%
+  filter(class %in% c("dI4_only", "dI4_dILA|dI5_dILB", "dI5_only")) 
+# %>%  # Only keep relevant classes
+#   filter(clone_size > 1)
+
+
+
+# Step 2: Calculate average, max, and min clone sizes for each class
+clone_stats_by_exp <- clone_sizes_filtered2 %>%
+  group_by(experiment, class) %>%
+  summarise(
+    avg_clone_size = mean(clone_size),
+    max_clone_size = max(clone_size),
+    min_clone_size = min(clone_size),
+    n_clones = n(),
+    .groups = "drop"
+  )
+
+
+ggplot(clone_sizes_filtered2, aes(x = class, y = clone_size, fill = class)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.05, alpha = 0.5) +
+  labs(title = "Average Clone Size",
+       x = " ",
+       y = "Clone Size (log10)") +
+  scale_fill_manual(values = c("dI4_only" = "#3F7D83", 
+                                "dI4_dILA|dI5_dILB" = "#6F9140"
+                                )) +  
+  scale_y_log10() +  # Set y-axis to log scale
+  scale_x_discrete(limits = c("dI4_only", "dI4_dILA|dI5_dILB")) +  # Order the classes
+facet_wrap(~ experiment, ncol = 3) +  # Use the modified factor levels for correct order
+  theme(
+    plot.title = element_text(size = 16, hjust = 0.5),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 14),
+    legend.position = "none",  # Remove legend if not needed
+    strip.background = element_rect(fill = "lightgray", color = "black"),  # Distinct strip background
+    strip.text = element_text(size = 14, face = "bold"),  # Distinct strip text
+    panel.spacing = unit(1, "lines")  # Increase spacing between facets
+  )
+
+
+ggsave(filename = "dI4_dI5_ONLY_clone_size-NEW-all-other-cells-included.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 24 ,
+    height = 16, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+```
+
+#Distribution dI4-5 in clones
+```{r}
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Step 1: Filter dI4/dI5 cells from multi-cell clones only
+di_cells <- seur_obj@meta.data %>%
+  filter(
+    Cell.type %in% c("dI4_dILA", "dI5_dILB"),
+    !is.na(exp_clone),
+    !is.na(experiment),
+    multi_cell_clone == "multi-cell_clone"  # NEW filter here
+  ) %>%
+  select(exp_clone, Cell.type, experiment)
+
+# Step 2: Count dI4/dI5 cells per clone per experiment
+clone_counts <- di_cells %>%
+  group_by(exp_clone, experiment, Cell.type) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  pivot_wider(names_from = Cell.type, values_from = n, values_fill = 0) %>%
+  filter(`dI4_dILA` + `dI5_dILB` > 0) %>%
+  mutate(ratio = `dI4_dILA` / (`dI4_dILA` + `dI5_dILB`))
+
+# Optional: set experiment order
+clone_counts$experiment <- factor(clone_counts$experiment, levels = c("HH28", "HH31", "HH35"))
+
+# Step 3: Calculate median ratio per experiment
+medians <- clone_counts %>%
+  group_by(experiment) %>%
+  summarise(med = median(ratio), .groups = "drop")
+
+# Step 2: Plot with KDE and histogram
+ggplot(clone_counts, aes(x = ratio)) +
+  geom_histogram(aes(y = ..density..), 
+                 binwidth = 0.05, 
+                 fill = "lightgray", 
+                 color = "black", 
+                 alpha = 0.5) +
+  geom_density(fill = "cornflowerblue", alpha = 0.4, color = NA) +
+  geom_vline(data = medians, aes(xintercept = med), 
+             color = "red", linetype = "dashed", linewidth = 1) +
+  facet_wrap(~ experiment, nrow = 1) +
+  theme_minimal(base_size = 14) +
+  labs(
+    x = "Fraction dI4 / (dI4 + dI5) in clones",
+    y = "Density"
+  )
+
+ggsave(filename = "dI4_dI5_KDE_experiments.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 28 ,
+    height = 15, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+#Divide dI4 into the ones that share and the ones that don't
+```{r}
+
+# Step 1: Filter for dI4_dILA and dI5_dILB cells, keeping the "experiment" column
+dI4_cells <- seur_obj@meta.data %>%
+  as_tibble(rownames = "cell_id") %>%  # Convert row names (cell IDs) into a "cell_id" column
+  filter(Cell.type == "dI4_dILA", !is.na(exp_clone), multi_cell_clone == "multi-cell_clone") %>%  # dI4_dILA cells
+  dplyr::select(cell_id, exp_clone, experiment, Cell.type)  # Keep relevant columns including experiment
+
+dI5_cells <- seur_obj@meta.data %>%
+  as_tibble(rownames = "cell_id") %>%  # Convert row names into a "cell_id" column
+  filter(Cell.type == "dI5_dILB", !is.na(exp_clone), multi_cell_clone == "multi-cell_clone") %>%  # dI5_dILB cells
+  dplyr::select(exp_clone, cell_id)  # We only need the exp_clone column from dI5 cells
+
+# Step 2: Identify shared clonal groups (exp_clone) between dI4_dILA and dI5_dILB
+shared_clones <- intersect(dI4_cells$exp_clone, dI5_cells$exp_clone)
+
+# Step 3: Categorize dI4_dILA cells based on shared exp_clone, keeping the experiment column
+dI4_cells_classes <- dI4_cells %>%
+  mutate(
+    clone_category = ifelse(exp_clone %in% shared_clones, 
+                            "shared_with_dI5", 
+                            "dI4_only")
+  )
+```
+
+
+
+##Check for diff gene expr between them
+```{r}
+# Add clone_category information to the Seurat object
+seur_obj@meta.data$dI4_clone_category <- NA  # Create an empty column
+
+# Assign the clone categories from dI4_cells_classes to the Seurat object
+seur_obj@meta.data[dI4_cells_classes$cell_id, "dI4_clone_category"] <- dI4_cells_classes$clone_category
+
+# df = seur_obj@meta.data$dI4_clone_category
+
+# Subset the Seurat object to keep only dI4_dILA cells
+seur_obj_dI4 <- subset(seur_obj, cells = dI4_cells$cell_id)
+
+# seur_obj_dI4_HH28 <- subset(seur_obj, 
+#                              cells = dI4_cells$cell_id[dI4_cells$experiment == "HH28"])
+
+
+
+#Plot diff cells on umap
+# Convert to character first
+seur_obj@meta.data$dI4_clone_category <- as.character(seur_obj@meta.data$dI4_clone_category)
+
+# Replace NA with "Unknown"
+seur_obj@meta.data$dI4_clone_category[is.na(seur_obj@meta.data$dI4_clone_category)] <- "Unknown"
+
+# Re-factor with desired level order
+seur_obj@meta.data$dI4_clone_category <- factor(
+  seur_obj@meta.data$dI4_clone_category,
+  levels = c("Unknown", "dI4_only","shared_with_dI5"))
+
+
+```
+
+#Calculate DEGs with Seurat
+```{r}
+
+
+# 1. Differential expression analysis
+diff_exp_results <- FindMarkers(
+  seur_obj_dI4,
+  ident.1 = "shared_with_dI5",
+  ident.2 = "dI4_only",
+  group.by = "dI4_clone_category",
+  min.pct = 0.1
+)
+
+# 2. Annotate significance and labels
+diff_exp_results <- diff_exp_results %>%
+  rownames_to_column(var = "gene_id") %>%
+  mutate(
+    significant = case_when(
+      p_val < 0.05 & avg_log2FC > 0.5 ~ "Upregulated",
+      p_val < 0.05 & avg_log2FC < -0.5 ~ "Downregulated",
+      TRUE ~ "Not significant"
+    ),
+    highlight_gene = gene_id %in% c("TFAP2B", "NPY", "KCNIP4", "PRKCD", "PRKCA")
+  )
+
+# 3. Volcano plot (with raw p-values)
+p <- ggplot(diff_exp_results, aes(x = avg_log2FC, y = -log10(p_val))) +
+  geom_point(aes(color = significant), size = 2, alpha = 0.6) +
+  geom_point(data = filter(diff_exp_results, highlight_gene),
+             shape = 21, fill = "gold", color = "black", stroke = 1.2, size = 3.5) +
+  geom_text_repel(data = filter(diff_exp_results, highlight_gene),
+                  aes(label = gene_id), size = 3) +
+  scale_color_manual(values = c(
+    "Upregulated" = "darkred",
+    "Downregulated" = "darkblue",
+    "Not significant" = "grey85"
+  )) +
+  labs(
+    title = "Genes up and down in dI4 sharing with dI5 vs dI4-only cells",
+    x = "Log2 Fold Change",
+    y = "-log10(p-value)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, hjust = 0.5),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14)
+  )
+
+# 4. Save plot
+ggsave(filename = "volcano-DEGs-pval.pdf", plot = p, path = plots,
+       scale = 1, width = 20, height = 14, units = "cm", dpi = 300, bg = "transparent")
+
+```
+
+
+#Fig.S5
+##Mouse dI4/dI5 proporstions
+```{r}
+library(dplyr)
+library(ggplot2)
+library(readr)
+
+# Step 1: Read CSV
+raw <- read_csv("/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/Delile2019/dI4_dI5_Propotions.csv")
+
+# Step 2: Reshape to long format (from wide)
+data_long <- raw %>%
+  pivot_longer(-1, names_to = "experiment", values_to = "n_cells") %>%
+  rename(Cell.type = ...1)
+
+# Make sure experiment is a factor
+experiment_order <- c( "11.5", "12.5", "13.5")
+
+data_long <- data_long %>%
+  filter(experiment %in% experiment_order) %>%
+  mutate(
+    experiment = factor(experiment, levels = experiment_order),
+    Cell.type = factor(Cell.type, levels = c("dI4", "dI5"))
+  )
+
+# Step 1: Compute total cells per experiment
+data_wide <- data_long %>%
+  pivot_wider(names_from = Cell.type, values_from = n_cells, values_fill = 0) %>%
+  mutate(
+    total = dI4 + dI5,
+    dI4_ratio = dI4 / total,
+    dI5_ratio = dI5 / total
+  )
+
+# Step 2: Convert back to long format for stacked bar
+plot_data <- data_wide %>%
+  select(experiment, dI4_ratio, dI5_ratio) %>%
+  pivot_longer(cols = c(dI4_ratio, dI5_ratio), names_to = "Cell.type", values_to = "ratio") %>%
+  mutate(Cell.type = recode(Cell.type, dI4_ratio = "dI4", dI5_ratio = "dI5"))
+
+# Step 3: Prepare for stacked bars
+summary_ratios <- plot_data %>%
+  arrange(experiment, Cell.type) %>%
+  group_by(experiment) %>%
+  mutate(
+    ymin = if_else(Cell.type == "dI4", 0, lag(ratio)),
+    ymax = ymin + ratio
+  ) %>%
+  ungroup()
+
+# Step 4: Plot
+ggplot(summary_ratios, aes(x = experiment, fill = Cell.type)) +
+  geom_rect(aes(xmin = as.numeric(experiment) - 0.3,
+                xmax = as.numeric(experiment) + 0.3,
+                ymin = ymin,
+                ymax = ymax),
+            color = "black") +
+  geom_text(aes(x = experiment,
+                y = ymin + ratio / 2,
+                label = round(ratio, 2)),
+            color = "white",
+            size = 4) +
+  scale_fill_manual(values = c("dI4" = "#3F7D83", "dI5" = "#BA600F")) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    breaks = seq(0, 1, 0.1),
+    expand = c(0, 0)
+  ) +
+  scale_x_discrete() +
+  labs(
+    title = "Stacked ratios of dI4 and dI5 in mouse",
+    x = NULL,
+    y = "Ratio"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 16, hjust = 0.5, face = "bold"),
+    panel.grid.minor.y = element_blank(),
+    legend.title = element_blank()
+  )
+
+# Optional: Save
+
+ggsave(filename = "mouse_dI4_dI5_ratio_onlyE11.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 17 ,
+    height = 16, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+```
+
+#Gene comparison by experiment
+```{r}
+library(ggpubr)
+
+# Define variables
+gene_label <- "KCNIP4"
+# gene_label <- "TFAP2B"
+cell_type_of_interest <- "dI4_dILA"
+
+# Step 1: Get cells of that Cell.type
+selected_cells <- seur_obj@meta.data %>%
+  filter(Cell.type == cell_type_of_interest) %>%
+  rownames()
+
+# Step 2: Fetch expression + experiment info
+plot_data <- FetchData(seur_obj, vars = c(gene_label, "experiment")) %>%
+  filter(rownames(.) %in% selected_cells)
+
+# Clean up
+colnames(plot_data) <- c("expression", "experiment")
+
+# Step 3: Plot
+
+kruskal_result <- kruskal.test(expression ~ experiment, data = plot_data)
+pval <- signif(kruskal_result$p.value, digits = 3)
+group_levels <- levels(factor(plot_data$experiment))
+first_group <- group_levels[1]
+
+
+colors <- c("HH28" = "#7F7FFF","HH31" = "#7FBF7F", "HH35" = "#FF7F7F")
+
+ggplot(plot_data, aes(x = experiment, y = expression, fill = experiment)) +
+  geom_violin(trim = FALSE, scale = "width") +
+  geom_jitter(width = 0.2, size = 0.2, alpha = 0.2, color = "black") +
+scale_fill_manual(values = colors)+
+  geom_text(
+    data = data.frame(experiment = first_group),
+    aes(x = experiment, y = max(plot_data$expression) * 1.5),
+    label = paste0("p = ", pval),
+    size = 4,
+    fontface = "italic"
+  ) +
+
+  scale_y_continuous(trans = "log1p") +
+
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none"
+  ) +
+  labs(
+    title = paste(gene_label, "expression in", cell_type_of_interest, "cells"),
+    x = "Experiment",
+    y = "Expression (log1p)")
+
+
+ggsave(filename = "KCNIP4_across_exp_vlnplot.pdf", plot = last_plot(), path = plots,
+          scale = 1, width = 18,
+          height = 16, units = "cm",
+          dpi = 300, bg = "transparent")
+
+```

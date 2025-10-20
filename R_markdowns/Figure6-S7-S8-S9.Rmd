@@ -1,0 +1,1368 @@
+---
+title: "Figure_4_plots"
+output: html_document
+date: "2025-01-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Libraries
+```{r init}
+library(dplyr)
+library(Seurat)
+library(readr)
+library(tidyverse)
+library(scCustomize)
+library(ggplot2)
+library(ggrepel)
+library(glue)
+
+```
+
+#PATHS
+```{r}
+plots = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure6/" 
+
+data = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/data/"
+
+```
+
+#Read rds 
+```{r}
+seur_obj <- read_rds("/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/human_LARRY/SO/preprocessing_larry_human_clusters.rds")
+
+
+colnames(seur_obj@meta.data)[colnames(seur_obj@meta.data) == "cell_type"] <- "Cell.type"
+
+colnames(seur_obj@meta.data)[colnames(seur_obj@meta.data) == "clone"] <- "exp_clone"
+
+# Column 1: "experiment"
+seur_obj@meta.data$experiment <- case_when(
+  seur_obj@meta.data$sample %in% c("BOE7075A1", "BOE7075A2") ~ "CS17",
+  seur_obj@meta.data$sample %in% c("BOE7075A4") ~ "CS16",
+  TRUE ~ NA_character_
+)
+
+
+# Column 2: "samples_LARRY"
+seur_obj@meta.data$samples_LARRY <- case_when(
+  seur_obj@meta.data$sample %in% c("BOE7075A2", "BOE7075A4") ~ "LARRY",
+  seur_obj@meta.data$sample %in% c("BOE7075A1") ~ "control",
+  TRUE ~ NA_character_
+)
+
+seur_obj@meta.data <- seur_obj@meta.data %>%
+  mutate(clone_id_detected = case_when(
+    samples_LARRY %in% c("LARRY") & !is.na(exp_clone) ~ "detected",
+   samples_LARRY %in% c("LARRY") & is.na(exp_clone) ~ "not_detected",
+    TRUE ~ NA_character_
+  ))
+
+seur_obj@meta.data$Cell.type <- seur_obj@meta.data$Cell.type %>%
+  recode("Immature neurons" = "immature neurons") %>%
+  replace_na("Unknown")
+
+
+### Clone size
+# Step 1: Compute clone sizes from exp_clone
+clone_sizes <- seur_obj@meta.data %>%
+  filter(!is.na(exp_clone)) %>%
+  count(exp_clone, name = "clone_size")
+
+# Step 2: Join clone sizes back to meta.data safely
+meta_with_clone_status <- seur_obj@meta.data %>%
+  left_join(clone_sizes, by = "exp_clone") %>%
+  mutate(multi_cell_clone = case_when(
+    clone_size > 1 ~ "multi-cell_clone",
+    clone_size == 1 ~ "single-cell_clone",
+    TRUE ~ NA_character_  # keep NA where no exp_clone
+  ))
+
+# Ensure rownames are preserved
+rownames(meta_with_clone_status) <- rownames(seur_obj@meta.data)
+
+# Step 4: Add the new column to the Seurat object
+seur_obj <- AddMetaData(seur_obj, metadata = meta_with_clone_status$multi_cell_clone, col.name = "multi_cell_clone")
+
+
+#Count number unique clones
+filtered_n_clones <- seur_obj@meta.data %>%
+  filter(!is.na(exp_clone),
+         multi_cell_clone == "multi-cell_clone") %>%
+  pull(exp_clone) %>%
+  unique() %>%
+  length()
+
+filtered_n_clones
+
+```
+
+#Fig.6
+##Set new colors
+```{r}
+
+celltype_order <- c("RP-dp1","dp1-3", "dpL", "dp6/p2", "pMN/p3",  "FP", "OPCs", "dI1" , "dI2/3","dI4_dILA","dI5_dILB", "dI6","V0","V1","V2","MN","V3", "Unknown", "mesoderm/drg")
+                                               
+
+colors_ids_fine <- c(
+              "lightskyblue", #RP
+                     "deepskyblue", # dp1_2 
+                       "deepskyblue3", #dpL
+                     "deepskyblue4", # DP6-P2
+              "dodgerblue4", #pMN-p3
+              "blue", #FP
+              "darkorchid4", # OPCs 
+              "wheat2",#dI1
+                     "khaki", #dI2/3      
+       "goldenrod2", #dI4_dILA
+              "darkgoldenrod1", #dI5_dILB 
+              "darkolivegreen3", #dI6 
+              "limegreen", #V0
+              "palegreen3", # V1
+              "darkseagreen", #V2
+              "darkgreen", #MN
+              "seagreen", #V3
+       "grey95", #Unknwo
+       "grey70" #meso
+  )
+
+# Create a named vector for colors
+cell_type_colors <- setNames(colors_ids_fine, celltype_order)
+
+```
+
+##UMAPs
+```{r fig.height=16, fig.width=20}
+
+
+#Plot for normal UMAP with cell type names
+
+
+# Ensure Cell.type follows the specified order
+seur_obj$Cell.type <- factor(seur_obj$Cell.type, levels = celltype_order)
+seur_obj <- SetIdent(seur_obj, value = seur_obj@meta.data$Cell.type)
+
+
+#with degrading colours
+DimPlot(seur_obj,
+            label = F,
+        pt.size = 1,
+        repel = T,
+        dims = c(1, 3)
+        ) +
+      # NoLegend() +
+      coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL) +
+      scale_color_manual(values = cell_type_colors) +
+      guides(color = guide_legend(override.aes = list(size = 4))) + # Adjust legend appearance if needed
+      theme(
+        legend.position = "right",  # Forces legend to stay in a fixed position
+        legend.key.size = unit(0.5, "cm"),  # Standardize legend key size
+        legend.text = element_text(size = 12)  # Standardize legend text size
+      ) 
+
+
+ggsave(filename = "umap-sub-colors-fine-degrading-legend-dim1-3.png", plot = last_plot(), path = plots,
+    scale = 1, width = 45 ,
+    height = 40, units = "cm",
+    dpi = 300, bg = "transparent")
+```
+
+
+##Spearman and Pearson correlation with in vivo
+Use EntropySorting to find a set of 781 genes that separate cell states in the Rayon dataset (Rayon et al, 2021).
+For each timepoint of the Rayon dataset create pseudobulk gene expression by averaging the expression of each of the 781 genes.
+Do the same for each of the samples in the slice data.
+Calculate the Pearsons correlations between pseudobulk samples.
+```{r}
+# Load libraries
+library(tidyverse)
+library(readr)
+
+# Load data
+df <- read_csv("/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/human_LARRY/Rayon_Vs_Slice_Timepoint_Spearman_Correlations.csv")
+
+# Convert to long format
+df_long <- df %>%
+  pivot_longer(-1, names_to = "Slice_Timepoint", values_to = "Correlation") %>%
+  rename(Rayon = 1)
+
+# Plot heatmap
+ggplot(df_long, aes(x = Slice_Timepoint, y = Rayon, fill = Correlation)) +
+  geom_tile(color = "white") +
+  # scale_fill_gradient2(low = "#2166AC", mid = "grey90", high = "#B2182B", midpoint = 0)+
+scale_fill_viridis_c(option = "viridis")+
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid = element_blank()
+  ) +
+  labs(title = "Correlation Heatmap", x = NULL, y = NULL)
+
+ggsave(
+  filename = "Spearman_corr_slices_Rayon.pdf",
+  plot = last_plot(),
+  path = plots,
+  scale = 1,
+  width = 20,
+  height = 15,
+  units = "cm",
+  dpi = 300,
+  bg = "transparent"
+)
+```
+
+
+##dI4_dI5 UMAP
+```{r}
+
+# Define the clusters for each group
+highlight_clusters_1 <- c("dI4_dILA")  # Replace with your actual cluster names
+highlight_clusters_2 <- c("dI5_dILB")  # Replace with your actual cluster names
+
+# Create a new metadata column for highlighting
+seur_obj@meta.data$highlight <- ifelse(seur_obj@meta.data$`Cell.type` %in% highlight_clusters_1, "dI4_dILA",
+                               ifelse(seur_obj@meta.data$`Cell.type` %in% highlight_clusters_2, "dI5_dILB", "Other"))
+
+DimPlot(seur_obj, dim = c(1,3), group.by = "highlight", cols = c("dI4_dILA" = "#3F7D83", "dI5_dILB" = "#BA600F", "Other" = "grey"))+ 
+  labs(title = NULL) +
+      coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL)
+
+#Save
+ggsave(filename = paste0("dI4_dI5_UMAP-dim1-3", ".png"), plot = last_plot(), path = plots,scale = 1, width = 23 ,
+    height = 20, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+
+##dI4-5 ratio inverted median replicates
+```{r}
+
+library(dplyr)
+library(ggplot2)
+
+# Define experiment order
+experiment_order <- c("CS16", "CS17")
+
+# Step 1: Compute per-replicate ratios
+replicate_ratios <- seur_obj@meta.data %>%
+  filter(
+    Cell.type %in% c("dI4_dILA", "dI5_dILB")
+    # ,
+    # clone_id_detected == "detected"
+  ) %>%
+  mutate(experiment = factor(experiment, levels = experiment_order)) %>%
+  group_by(experiment, sample, Cell.type) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(experiment, sample) %>%
+  mutate(
+    total = sum(n),
+    ratio = n / total
+  ) %>%
+  ungroup()
+
+# Step 2: Get median and SEM
+summary_ratios <- replicate_ratios %>%
+  group_by(experiment, Cell.type) %>%
+  summarise(
+    median_ratio = median(ratio),
+    sem = sd(ratio) / sqrt(n()),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    experiment = factor(experiment, levels = experiment_order),
+    Cell.type = factor(Cell.type, levels = c("dI4_dILA", "dI5_dILB"))  # order: dI4 below
+  ) %>%
+  arrange(experiment, Cell.type)
+
+# Step 3: Compute ymin/ymax manually for stacking
+summary_ratios <- summary_ratios %>%
+  group_by(experiment) %>%
+  mutate(
+    ymin = c(0, median_ratio[1]),
+    ymax = ymin + median_ratio
+  ) %>%
+  ungroup()
+
+# Step 4: Plot
+ggplot(summary_ratios, aes(x = experiment, fill = Cell.type)) +
+  # Manual stacked bars
+  geom_rect(aes(xmin = as.numeric(experiment) - 0.3,
+                xmax = as.numeric(experiment) + 0.3,
+                ymin = ymin,
+                ymax = ymax),
+            color = "black") +
+
+  # Error bars
+  geom_errorbar(aes(
+    x = experiment,
+    ymin = pmax(ymax - sem, ymin),  # Prevents going below bottom of bar
+    ymax = pmin(ymax + sem, 1)      # Prevents going over 1
+  ),
+  width = 0.2,
+  color = "black",
+  position = position_identity()) +
+
+  # Ratio labels
+  geom_text(aes(
+    x = experiment,
+    y = ymin + median_ratio / 2,
+    label = round(median_ratio, 2)
+  ),
+  color = "white",
+  size = 4) +
+
+  # Manual fill colors
+  scale_fill_manual(
+    values = c("dI4_dILA" = "#3F7D83", "dI5_dILB" = "#BA600F"),
+    breaks = c("dI4_dILA", "dI5_dILB")
+  ) +
+
+  # Y axis config
+  scale_y_continuous(
+    limits = c(0, 1),
+    breaks = seq(0, 1, 0.1),
+    expand = c(0, 0)
+  ) +
+
+  # X axis config
+  scale_x_discrete() +
+
+  # Labels and theme
+  labs(
+    title = "Stacked median ratios of dI4 and dI5 in all cells",
+    x = NULL,
+    y = "Ratio"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(size = 16, hjust = 0.5, face = "bold", margin = margin(b = 20)),
+    panel.grid.minor.y = element_blank(),
+    legend.title = element_blank(),
+    plot.margin = margin(t = 30, r = 15, b = 15, l = 15)
+  )
+
+
+ggsave(filename = "dI4_dI5_ratio_all_median_replicates.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 15 ,
+    height = 16, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+##Distribution dI4-5 in clones
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Step 1: Filter dI4/dI5 cells from multi-cell clones only
+di_cells <- seur_obj@meta.data %>%
+  filter(
+    Cell.type %in% c("dI4_dILA", "dI5_dILB"),
+    !is.na(exp_clone),
+    !is.na(experiment),
+    multi_cell_clone == "multi-cell_clone"  # NEW filter here
+  ) %>%
+  select(exp_clone, Cell.type, experiment)
+
+# Step 2: Count dI4/dI5 cells per clone per experiment
+clone_counts <- di_cells %>%
+  group_by(exp_clone, experiment, Cell.type) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  pivot_wider(names_from = Cell.type, values_from = n, values_fill = 0) %>%
+  filter(`dI4_dILA` + `dI5_dILB` > 0) %>%
+  mutate(ratio = `dI4_dILA` / (`dI4_dILA` + `dI5_dILB`))
+
+
+# Step 3: Calculate median ratio per experiment
+medians <- clone_counts %>%
+  group_by(experiment) %>%
+  summarise(med = median(ratio), .groups = "drop")
+
+# Step 2: #KDE and histogram
+ggplot(clone_counts, aes(x = ratio)) +
+  geom_histogram(aes(y = ..density..), 
+                 binwidth = 0.05, 
+                 fill = "lightgray", 
+                 color = "black", 
+                 alpha = 0.5) +
+  geom_density(fill = "cornflowerblue", alpha = 0.4, color = NA) +
+  # geom_vline(data = medians, aes(xintercept = med), 
+  #            color = "red", linetype = "dashed", linewidth = 1) +
+  # facet_wrap(~ experiment, nrow = 1) +
+  theme_minimal(base_size = 14) +
+  labs(
+    x = "Fraction dI4 / (dI4 + dI5) in clones",
+    y = "Density"
+  )
+
+ggsave(filename = "dI4_dI5_KDE_tot.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 18,
+    height = 15, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+ggplot(clone_counts, aes(x = ratio)) +
+  geom_histogram(binwidth = 0.1,
+                 fill = "lightgray", 
+                 color = "black") +
+  theme_minimal(base_size = 14) +
+  labs(
+    x = "Fraction dI4 / (dI4 + dI5) in clones",
+    y = "Count"
+  ) +
+  facet_wrap(~ experiment, nrow = 1) 
+```
+
+
+#S7
+##UMAP by experiment S7
+```{r}
+
+colors <- c("violet", "steelblue4")
+
+seur_obj$experiment <- factor(seur_obj$experiment, levels = c("CS16", "CS17"))
+
+DimPlot(seur_obj,
+            label = F,
+        group.by = "experiment",
+        shuffle = T,
+        pt.size= 1, 
+        dims = c(1, 3),
+        cols = colors,
+        repel = T
+        ) +
+      labs(title = NULL) +  # Removes title
+      coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL) +
+      guides(color = guide_legend(override.aes = list(size = 4))) + # Adjust legend appearance if needed
+      theme(
+        legend.position = "right",  # Forces legend to stay in a fixed position
+        legend.key.size = unit(0.5, "cm"),  # Standardize legend key size
+        legend.text = element_text(size = 12)  # Standardize legend text size
+      ) +
+  NoLegend()
+
+ggsave(filename = "UMAP_samples_colors-nolegend.png", plot = last_plot(), path = plots,
+    scale = 1, width = 23 ,
+    height = 23, units = "cm",
+    dpi = 300, bg = "transparent")
+
+#UMAP by experiment
+
+DimPlot(seur_obj,
+            label = F,
+        group.by = "experiment",
+        split.by = "experiment",
+        shuffle = T,
+        pt.size= 1, 
+        dims = c(1, 3),
+        cols = colors,
+        repel = T
+        ) +
+      labs(title = NULL) +  # Removes title
+      coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL) +
+      guides(color = guide_legend(override.aes = list(size = 4))) + # Adjust legend appearance if needed
+      theme(
+        legend.position = "right",  # Forces legend to stay in a fixed position
+        legend.key.size = unit(0.5, "cm"),  # Standardize legend key size
+        legend.text = element_text(size = 12)  # Standardize legend text size
+      )
+
+ggsave(filename = "UMAP_samples_colors_split.png", plot = last_plot(), path = plots,
+    scale = 1, width = 37 ,
+    height = 23, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+##FeaturePlots
+```{r}
+##Featureplot multiple features in loop
+
+
+markers = c("OLIG2", "SOX2", "NKX6-1", "PAX6", "PAX7", "PDGFRA", "GFAP", "FOXJ1", "SLC17A6", "SLC32A1", "GAD1",  "SLC6A5")
+markers = c("PAX2", "GATA3", "GATA2", "EN1", "EVX1", "VSX2", "SIM1")
+markers = c("NKX6-2", "LHX2", "ISL1", "FOXD3", "OLIG1")
+
+
+#If you have the gene names directly:
+
+for (gene in markers) {
+  # Try to generate and save the plot
+  tryCatch({
+    # Generate the plot
+    p <- FeaturePlot(seur_obj, features = gene, 
+                     dims = c(1, 3),
+                     min.cutoff = "q5", max.cutoff = "q90", 
+                     cols = c("grey80", "dodgerblue4"), 
+                     order = TRUE) +
+         scale_x_discrete(breaks = NULL) +
+         scale_y_discrete(breaks = NULL) +
+         labs(title = paste0(gene, " expressing cells"))
+
+    print(p)  # Ensure the plot is evaluated
+
+    # Save the plot
+    ggsave(
+      filename = paste0(gene, "_q5q90Featureplot-dims1-2.png"),
+      plot = p,
+      path = plots,
+      scale = 1,
+      width = 17,
+      height = 16,
+      units = "cm",
+      dpi = 300,
+      bg = "transparent"
+    )
+  },
+  error = function(e) {
+    message(paste("Skipping", gene, "– not found or plot failed."))
+  })
+}
+
+
+```
+
+#S8
+##Plot clones detected and multicell clones over umap S8
+```{r}
+Meta_Highlight_Plot(seurat_object = seur_obj,pt.size = 1.2, dims = c(1, 3), meta_data_column = "clone_id_detected",
+    meta_data_highlight = c("not_detected","detected"), 
+    highlight_color = c(  "darkcyan","#E8997A", "grey90"),
+    background_color = "grey90")+
+        coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL)+
+      guides(color = guide_legend(override.aes = list(size = 4))) + # Adjust legend appearance if needed
+      theme(
+        legend.position = "right",  # Forces legend to stay in a fixed position
+        legend.key.size = unit(0.5, "cm"),  # Standardize legend key size
+        legend.text = element_text(size = 12)  # Standardize legend text size
+      ) +
+  NoLegend()
+ggsave(filename = "clone_detected-noledeng.png", plot = last_plot(), path = plots,
+    scale = 1, width = 23 ,
+    height = 23, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+
+
+DimPlot(seur_obj, 
+        pt.size= 1, 
+        cols = c("multi-cell_clone" = "darkblue", "single-cell_clone" = "red"), 
+        shuffle = T,
+        dims = c(1,3),
+        order = T,
+        na.value = "grey90",
+        group.by = "multi_cell_clone") +
+      labs(title = NULL) +  # Removes title
+      coord_fixed(ratio = 1) +
+      scale_x_discrete(breaks = NULL) +
+      scale_y_discrete(breaks = NULL) +
+      guides(color = guide_legend(override.aes = list(size = 4))) + # Adjust legend appearance if needed
+      theme(
+        legend.position = "right",  # Forces legend to stay in a fixed position
+        legend.key.size = unit(0.5, "cm"),  # Standardize legend key size
+        legend.text = element_text(size = 12)  # Standardize legend text size
+      )+
+  NoLegend()
+
+
+ggsave(filename = "multicellular_clones-nolegend.png", plot = last_plot(), path = plots,
+    scale = 1, width = 23 ,
+    height = 23, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+
+##Pie chart number of cells in multicellular clones S8
+```{r}
+# Step 1: Prepare data (removing NA)
+clone_counts <- seur_obj@meta.data %>%
+  filter(!is.na(multi_cell_clone)) %>%
+  count(multi_cell_clone) %>%
+  mutate(
+    per = round(n / sum(n) * 100, 1),
+    label = paste0(per, "%")
+  )
+
+# Step 2: Plot
+ggplot(data = clone_counts) +
+  geom_bar(aes(x = "", y = per, fill = multi_cell_clone), stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  geom_text(aes(x = 1, y = cumsum(per) - per / 2, label = label), color = "white", size = 6) +
+  scale_fill_manual(
+    labels = c("Multicellular clones", "Single-cell clones"),
+    name = NULL,
+    values = c("multi-cell_clone" = "blue", "single-cell_clone" = "red")
+  )
+
+# Step 3: Save plot
+ggsave(
+  filename = "multicell_clones_cells_pie.pdf",
+  plot = last_plot(),
+  path = plots,
+  scale = 1,
+  width = 26,
+  height = 15,
+  units = "cm",
+  dpi = 300,
+  bg = "transparent"
+)
+```
+
+##Pie chart number of multicell clones S8
+```{r}
+# Step 1: Filter out NA exp_clone values and group by multi_cell_clone
+clone_summary <- seur_obj@meta.data %>%
+  filter(!is.na(multi_cell_clone), !is.na(exp_clone)) %>%
+  group_by(multi_cell_clone) %>%
+  summarise(n_clones = n_distinct(exp_clone)) %>%
+  ungroup()
+
+print(clone_summary)
+
+
+# Add percentages and labels
+clone_summary <- clone_summary %>%
+  mutate(
+    per = round(n_clones / sum(n_clones) * 100, 1),
+    label = paste0(per, "%")
+  )
+
+# Plot
+ggplot(data = clone_summary) +
+  geom_bar(aes(x = "", y = per, fill = multi_cell_clone), stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  geom_text(aes(x = 1, y = cumsum(per) - per / 2, label = label), color = "white", size = 6) +
+  scale_fill_manual(
+  name = NULL,
+  values = c("multi-cell_clone" = "blue", "single-cell_clone" = "red"),
+  labels = c("multi-cell_clone" = "Multicellular clones", 
+             "single-cell_clone" = "Single-cell clones")
+  )
+
+
+# Save
+ggsave(
+  filename = "multicell_vs_single_clones_count_pie.pdf",
+  plot = last_plot(),
+  path = plots,
+  scale = 1,
+  width = 26,
+  height = 15,
+  units = "cm",
+  dpi = 300,
+  bg = "transparent"
+)
+```
+
+
+##Pie charts  clone detected S8
+```{r}
+
+clone_detect_counts <- seur_obj@meta.data %>%
+  filter(!grepl("control", samples_LARRY, ignore.case = TRUE)) %>%  # remove control samples
+  filter(!is.na(clone_id_detected)) %>%  # remove NAs
+  count(clone_id_detected) %>%
+  mutate(
+    per = round(n / sum(n) * 100, 1),
+    label = paste0(per, "%")
+  )
+
+ggplot(clone_detect_counts) +
+  geom_bar(aes(x = "", y = per, fill = clone_id_detected), stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  geom_text(
+    aes(x = 1, y = cumsum(per) - per / 2, label = label),
+    color = "white",
+    size = 6
+  ) +
+  scale_fill_manual(
+    labels = c("Detected", "Not detected"),
+    name = NULL,
+    values = c("detected" = "darkcyan", "not_detected" = "#E8997A")
+  )
+
+ggsave(
+  filename = "clone_detected_avg_pie.pdf",
+  plot = last_plot(),
+  path = plots,
+  scale = 1,
+  width = 18,
+  height = 15,
+  units = "cm",
+  dpi = 300,
+  bg = "transparent"
+)
+
+
+# Step 1: Prepare counts per experiment, excluding controls
+clone_detect_facet <- seur_obj@meta.data %>%
+  filter(!grepl("control", samples_LARRY, ignore.case = TRUE)) %>%
+  filter(!is.na(clone_id_detected), !is.na(experiment)) %>%
+  count(experiment, clone_id_detected) %>%
+  group_by(experiment) %>%
+  mutate(
+    per = round(n / sum(n) * 100, 1),
+    label = paste0(per, "%"),
+    ypos = cumsum(per) - per / 2
+  ) %>%
+  ungroup()
+
+ggplot(clone_detect_facet, aes(x = "", y = per, fill = clone_id_detected)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  geom_text(aes(y = ypos, label = label), color = "white", size = 4) +
+  coord_polar("y", start = 0) +
+  scale_fill_manual(
+    values = c("detected" = "darkcyan", "not_detected" = "#E8997A"),
+    labels = c("Detected", "Not detected"),
+    name = NULL
+  ) +
+  facet_wrap(~ experiment) +
+  theme_void() +
+  theme(
+    strip.text = element_text(size = 12, face = "bold")
+  )
+
+# Step 3: Save plot
+ggsave(
+  filename = "clone_detected_experiments_pie.pdf",
+  plot = last_plot(),
+  path = plots,
+  scale = 1,
+  width = 45,
+  height = 15,
+  units = "cm",
+  dpi = 300,
+  bg = "transparent"
+)
+
+
+```
+
+
+##Upset plot
+```{r}
+seur_obj@meta.data <- seur_obj@meta.data %>%
+  mutate(cell_category = case_when(
+    Cell.type %in% c("RP_dp1", "dp1-3", "dpL", "dp6/p2", "pMN/p3", "FP") ~ "Neural Progenitors",
+    Cell.type %in% c("dI1", "dI2/3", "dI4_dILA", "dI5_dILB", "dI6", "V0", "V1", "V2",  "MN", "V3") ~ "Neurons"
+  ))
+
+# 
+# celltype_order <- c("RP-dp1","dp1-3", "dpL", "dp6/p2", "pMN/p3",  "FP", "OPCs", "dI1" , "dI2/3","dI4_dILA","dI5_dILB", "dI6","V0","V1","V2","MN","V3", "Unknown", "mesoderm/drg")
+
+table(seur_obj@meta.data$cell_category)
+
+
+
+library(ComplexUpset)
+
+upset_df <- seur_obj@meta.data %>%
+  filter(
+    !is.na(exp_clone),
+    !is.na(cell_category),
+    multi_cell_clone == "multi-cell_clone"
+  ) %>%
+  distinct(exp_clone, cell_category) %>%
+  mutate(present = 1) %>%
+  pivot_wider(
+    names_from = cell_category,
+    values_from = present,
+    values_fill = list(present = 0)
+  )
+
+upset_df
+
+# Plot with custom color palette and clean theme
+
+upset(
+  upset_df,
+  intersect = c("Neurons", "Neural Progenitors"),  # Custom order
+  name = "Clonal Sharing",
+  set_sizes = FALSE,
+  base_annotations = list(
+    'Intersection size' = intersection_size()
+  )
+)
+
+
+ggsave(filename = "Upset_plots_broad_cat.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 15 ,
+    height = 12, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+
+```
+
+##Count dorsal and ventral clones (text)
+```{r}
+# Define classes
+# --- Define dorsal/ventral ---
+dorsal <- c("RP-dp1", "dp1-3", "dpL", "dI1", "dI2/3", "dI4_dILA", "dI5_dILB")
+ventral <- c("dp6/p2", "pMN/p3", "FP", "OPCs", "dI6", "V0", "V1", "V2", "MN", "V3")
+
+# --- Filter metadata and assign class ---
+meta_classed <- seur_obj@meta.data %>%
+  rownames_to_column("cell") %>%
+  filter(!is.na(exp_clone), multi_cell_clone == "single-cell_clone") %>%
+  mutate(class = case_when(
+    Cell.type %in% dorsal ~ "dorsal",
+    Cell.type %in% ventral ~ "ventral",
+    TRUE ~ "other"
+  ))
+
+# Re-classify clones while ignoring "other"
+pure_clones <- meta_classed %>%
+  filter(class %in% c("dorsal", "ventral")) %>%  # exclude "other" from this check
+  group_by(exp_clone) %>%
+  summarise(class_set = list(unique(class))) %>%
+  filter(lengths(class_set) == 1) %>%
+  mutate(class = unlist(class_set)) %>%
+  select(exp_clone, class)
+
+# Count pure clones
+clone_counts <- pure_clones %>%
+  count(class, name = "n_clones")
+
+clone_counts
+
+```
+
+
+##Clonal size
+```{r}
+# Step 1: Prepare clone sizes with experiment info
+clone_sizes <- seur_obj@meta.data %>%
+  filter(!is.na(exp_clone), !is.na(experiment)) %>%
+  group_by(exp_clone) %>%
+  summarise(
+    size = n(),
+    experiment = first(experiment)
+  )
+
+# Step 2: Set experiment order manually (HH28, HH31, HH35)
+clone_sizes$experiment <- factor(clone_sizes$experiment, levels = c("CS16", "CS17"))
+
+# Step 3: Plot violin plot with custom colors, no points, and median value
+colors <- c("violet", "steelblue4")
+
+ggplot(clone_sizes, aes(x = experiment, y = size, fill = experiment)) +
+  geom_violin(trim = TRUE, scale = "width", color = NA) +
+  stat_summary(fun = mean, geom = "point", shape = 95, size = 6, color = "black") +
+  stat_summary(fun = mean, geom = "text", aes(label = round(..y.., 2)), 
+               vjust = -1.2, size = 5, color = "black") +
+  scale_fill_manual(values = colors) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Clone Sizes Across Experiments",
+    x = "Experiment",
+    y = "Clone Size (number of cells)"
+  ) +
+  theme(legend.position = "none")
+
+ggsave(filename = "n_cells_all_clones_vln.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 20 ,
+    height = 17, units = "cm",
+    dpi = 300, bg = "transparent")
+  
+  
+  ####
+  
+  # Step 1: Filter to multicellular clones and calculate clone sizes
+clone_sizes_multi <- seur_obj@meta.data %>%
+  filter(
+    !is.na(exp_clone),
+    !is.na(experiment),
+    multi_cell_clone == "multi-cell_clone"
+  ) %>%
+  group_by(exp_clone) %>%
+  summarise(
+    size = n(),
+    experiment = first(experiment)
+  )
+
+# Step 2: Set experiment order manually 
+clone_sizes$experiment <- factor(clone_sizes$experiment, levels = c("CS16", "CS17"))
+
+# Step 3: Plot violin plot with custom colors, no points, and mean value
+colors <- c("violet", "steelblue4")
+
+ggplot(clone_sizes_multi, aes(x = experiment, y = size, fill = experiment)) +
+  geom_violin(trim = TRUE, scale = "width", color = NA) +
+  stat_summary(fun = mean, geom = "point", shape = 95, size = 6, color = "black") +
+  stat_summary(fun = mean, geom = "text", aes(label = round(..y.., 2)), 
+               vjust = -1.2, size = 5, color = "black") +
+  scale_fill_manual(values = colors) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Multicellular Clone Sizes Across Experiments",
+    x = "Experiment",
+    y = "Clone Size (number of cells)"
+  ) +
+  theme(legend.position = "none")+
+ coord_cartesian(ylim = c(1, NA))
+
+
+
+ggsave(filename = "n_cells_multicell_clones_vln.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 20 ,
+    height = 17, units = "cm",
+    dpi = 300, bg = "transparent")
+
+  
+```
+
+
+##Plot biggest shared clones over umap
+```{r}
+
+# 1. Get clone counts
+clone_counts <- di_cells %>%
+  group_by(exp_clone) %>%
+  summarise(
+    dI4 = sum(Cell.type == "dI4_dILA"),
+    dI5 = sum(Cell.type == "dI5_dILB"),
+    total = n(),
+    .groups = "drop"
+  )
+
+# 2. Filter for shared clones (both dI4 + dI5) and select top 10 by size
+top_shared <- clone_counts %>%
+  filter(dI4 > 0 & dI5 > 0) %>%
+  arrange(desc(total)) %>%
+  slice_head(n = 10) %>%
+  pull(exp_clone)
+
+# 3. Get UMAP coordinates
+umap_coords <- Embeddings(seur_obj, "umap")[, c(1,3)] %>% as.data.frame()
+umap_coords$cell <- rownames(umap_coords)
+
+meta_df <- seur_obj@meta.data %>%
+  tibble::rownames_to_column("cell")
+
+plot_df <- left_join(umap_coords, meta_df, by = "cell")
+
+# 4. Define highlight column
+plot_df <- plot_df %>%
+  mutate(highlight = ifelse(exp_clone %in% top_shared, exp_clone, "Other"))
+
+# 5. Plot: grey background + colored highlights
+ggplot() +
+  geom_point(
+    data = plot_df %>% filter(highlight == "Other"),
+    aes(x = UMAP_1, y = UMAP_3),
+    color = "grey90", size = 0.5, alpha = 0.5
+  ) +
+  geom_point(
+    data = plot_df %>% filter(highlight != "Other"),
+    aes(x = UMAP_1, y = UMAP_3, color = highlight),
+    size = 3, alpha = 0.9
+  ) +
+  scale_color_manual(
+    values = setNames(RColorBrewer::brewer.pal(10, "Paired"), top_shared)
+  ) +
+  labs(title = "Top 10 largest shared dI4/dI5 clones on UMAP") +
+  theme_classic() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  )
+
+ggsave(
+  filename = "top10_clones_dI4-dI5shared.png",
+  plot = last_plot(),
+  path = plots,
+  scale = 1,
+  width = 20,
+  height = 16,
+  units = "cm",
+  dpi = 300,
+  bg = "transparent"
+)
+
+
+
+```
+
+
+
+
+#Modelling
+##Comparison with binomial
+
+##Set up variables
+```{r}
+# Labels for clone ratio bins
+labels <- c("0.0", "1/3", "2/3", "1.0")
+
+# Observed counts
+observed <- c(11, 27, 27, 29)
+total <- sum(observed)
+
+# Binomial model probabilities for 3-cell clones
+binom_probs <- c(0.125, 0.375, 0.375, 0.125)
+expected_binom <- binom_probs * total
+```
+
+##Barplot - Observed vs Binomial Fig. 6I
+```{r}
+
+bar_df <- tibble(
+  `Clone Type` = factor(labels, levels = labels),
+  Observed = observed,
+  Expected = expected_binom
+)
+
+ggplot(bar_df, aes(x = `Clone Type`)) +
+  geom_bar(aes(y = Observed, fill = "Observed"), stat = "identity", color = "black", width = 0.6) +
+  geom_point(aes(y = Expected, shape = "Binomial Expected"), size = 3, color = "darkred") +
+  geom_text(aes(y = Observed, label = Observed), vjust = -0.5, size = 3.5) +
+  scale_fill_manual(name = NULL, values = c("Observed" = "grey")) +
+  scale_shape_manual(name = NULL, values = c("Binomial Expected" = 18)) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Observed vs Binomial Expected Clone Counts",
+    x = "dI4 / (dI4 + dI5) Ratio",
+    y = "Clone Count"
+  ) +
+  theme(legend.position = "top")
+
+ggsave("barplot_observed_vs_binomial.pdf", path = plots,
+       width = 16, height = 13, units = "cm", dpi = 300, bg = "transparent")
+```
+
+```{r}
+# Chi-square test of goodness-of-fit to binomial
+chisq.test(x = observed, p = binom_probs)
+
+# Test whether 1.0 bin is enriched vs binomial expectation
+binom.test(x = observed[labels == "1.0"], n = total, p = 0.125, alternative = "greater")
+```
+
+##New mixed models
+
+### Define Observed and Binomial Parameters
+```{r}
+# Labels for clone ratio bins
+labels <- c("0.0", "1/3", "2/3", "1.0")
+
+# Observed counts
+observed <- c(11, 27, 27, 29)
+total <- sum(observed)
+
+# Binomial model probabilities for 3-cell clones
+binom_probs <- c(0.125, 0.375, 0.375, 0.125)
+```
+
+### Fit Fixed Mixture Model
+```{r}
+log_likelihood_fixed <- function(alpha) {
+  mix <- alpha * binom_probs + (1 - alpha) * c(0, 0, 0, 1)
+  sum(dmultinom(observed, prob = mix, log = TRUE))
+}
+
+opt_fixed <- optimize(log_likelihood_fixed, interval = c(0, 1), maximum = TRUE)
+alpha_fixed <- opt_fixed$maximum
+mix_fixed <- alpha_fixed * binom_probs + (1 - alpha_fixed) * c(0, 0, 0, 1)
+fixed_counts <- mix_fixed * total
+```
+
+### Alpha estimation S9A
+```{r}
+
+# Define alpha grid
+alpha_grid <- seq(0, 1, by = 0.001)
+
+# Compute log-likelihood for each alpha
+loglik_fixed <- sapply(alpha_grid, log_likelihood_fixed)
+
+# Convert to tibble
+profile_fixed_df <- tibble(
+  alpha = alpha_grid,
+  logLik = loglik_fixed
+)
+
+# Find max log-likelihood and 95% CI threshold (chi-square 1 df → Δ = 1.92)
+max_loglik <- max(profile_fixed_df$logLik, na.rm = TRUE)
+ci_threshold <- max_loglik - 1.92
+
+# Determine 95% CI for alpha
+ci_fixed <- profile_fixed_df %>%
+  filter(logLik >= ci_threshold) %>%
+  summarise(lower = min(alpha), upper = max(alpha))
+
+ci_di4_only <- rev(1 - ci_fixed) 
+
+# Plot
+ggplot(profile_fixed_df, aes(x = alpha, y = logLik)) +
+  geom_line(color = "black") +
+  geom_vline(xintercept = alpha_fixed, linetype = "dashed", color = "red") +
+  # geom_hline(yintercept = ci_threshold, linetype = "dotted", color = "grey40") +
+  geom_vline(xintercept = ci_fixed$lower, linetype = "dotted", color = "darkred") +
+  geom_vline(xintercept = ci_fixed$upper, linetype = "dotted", color = "darkred") +
+  annotate("text", x = alpha_fixed, y = max_loglik, label = "MLE", vjust = -1, hjust = -0.2, size = 4, color = "red") +
+  annotate("text", x = ci_fixed$lower, y = ci_threshold, label = "95% CI",vjust = -1, hjust = 1.2, size = 3.5, color = "darkred") +
+  annotate("text", x = ci_fixed$upper, y = ci_threshold, label = "95% CI",vjust = -1, hjust = -0.2, size = 3.5, color = "darkred") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(
+    title = expression("Profile Log-Likelihood for " * alpha * " (Fixed Mixture Model)"),
+    x = expression(alpha),
+    y = "Log-Likelihood"
+  ) +
+  theme_minimal(base_size = 14)
+
+ggsave(filename = "fixed_model_alpha_loglikelihood.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 16 ,
+    height = 12, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+### Chi-square Statistics
+```{r}
+chi_sq <- function(obs, exp) {
+  sum((obs - exp)^2 / exp)
+}
+
+expected_binom <- binom_probs * total
+expected_fixed <- mix_fixed * total
+
+
+chisq_binom <- chi_sq(observed, expected_binom)
+chisq_fixed <- chi_sq(observed, expected_fixed)
+
+```
+
+## Bootstrapping
+```{r}
+n_boot <- 10000
+boot_model <- function(probs) {
+  replicate(n_boot, {
+    table(factor(sample(labels, size = total, replace = TRUE, prob = probs), levels = labels))
+  }) %>% t()
+}
+
+boot_observed <- replicate(n_boot, {
+  table(factor(sample(rep(labels, times = observed), total, replace = TRUE), levels = labels))
+}) %>% t()
+
+boot_binom <- boot_model(binom_probs)
+boot_fixed <- boot_model(mix_fixed)
+
+```
+
+### Bootstrap χ² and Empirical p-values
+```{r}
+chisq_obs_boot    <- apply(boot_observed, 1, chi_sq, exp = expected_binom)
+chisq_binom_boot  <- apply(boot_binom, 1, chi_sq, exp = expected_binom)
+chisq_fixed_boot  <- apply(boot_fixed, 1, chi_sq, exp = expected_fixed)
+
+
+p_binom <- (sum(chisq_binom_boot >= chisq_binom) + 1) / (length(chisq_binom_boot) + 1)
+p_fixed <- mean(chisq_fixed_boot >= chisq_fixed)
+
+
+# Summary
+fit_summary <- tibble(
+  Model = c("Binomial", "Fixed Mixture"),
+  ChiSq = c(chisq_binom, chisq_fixed),
+  p_value = c(p_binom, p_fixed)
+) %>%
+  mutate(
+    p_value_fmt = ifelse(p_value < 0.0001,
+                         formatC(p_value, format = "e", digits = 2),
+                         sprintf("%.4f", p_value))
+  )
+fit_summary
+
+write.csv(fit_summary, "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure4/fit_summary_metrics_models_nofree.csv",  row.names = FALSE)
+```
+
+### Log-likelihood, AIC, BIC
+```{r}
+loglik <- function(obs, probs) sum(dmultinom(obs, prob = probs, log = TRUE))
+ll_binom <- loglik(observed, binom_probs)
+ll_fixed <- loglik(observed, mix_fixed)
+
+
+aic <- function(loglik, k) 2 * k - 2 * loglik
+bic <- function(loglik, k, n) log(n) * k - 2 * loglik
+
+n <- total
+metrics <- tibble(
+  Model = c("Binomial", "Fixed Mixture"),
+  LogLikelihood = c(ll_binom, ll_fixed),
+  AIC = c(aic(ll_binom, 0), aic(ll_fixed, 1)),
+  BIC = c(bic(ll_binom, 0, n), bic(ll_fixed, 1, n))
+)
+metrics
+
+
+write.csv(metrics, "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure4/models_metrics_nofree.csv",  row.names = FALSE)
+
+```
+
+### Plot Chi-square Distributions S9B
+```{r}
+chisq_df <- tibble(
+  Binomial = chisq_binom_boot,
+  Fixed = chisq_fixed_boot
+) %>% pivot_longer(everything(), names_to = "Model", values_to = "ChiSq")
+
+obs_lines <- tibble(
+  Model = c("Binomial", "Fixed"),
+  ChiSq_obs = c(chisq_binom, chisq_fixed)
+)
+
+ggplot(chisq_df, aes(x = ChiSq, fill = Model)) +
+  geom_histogram(bins = 100, alpha = 0.8, position = "identity") +
+  geom_vline(data = obs_lines, aes(xintercept = ChiSq_obs, color = Model),
+             linetype = "dashed", size = 1) +
+  facet_wrap(~ Model, scales = "free", nrow = 1) +
+  labs(title = "Bootstrap Chi-square Distributions", x = expression(chi^2), y = "Count") +
+  scale_fill_manual(values = c("Binomial" = "gray", "Fixed" = "turquoise3")) +
+  scale_color_manual(values = c("Binomial" = "black", "Fixed" = "turquoise4")) +
+  theme_minimal(base_size = 14) +
+  NoLegend()
+
+
+
+ggsave(filename = "chi_square_distributions_models_nofree.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 17 ,
+    height = 12, units = "cm",
+    dpi = 300, bg = "transparent")
+```
+
+### Summarise bootstrap matrix to Mean, differences
+```{r}
+summarise_boot <- function(mat, source_name) {
+  as_tibble(mat) %>%
+    setNames(labels) %>%
+    pivot_longer(everything(), names_to = "Bin", values_to = "Count") %>%
+    group_by(Bin) %>%
+    summarise(
+      Mean = mean(Count),
+      Lower = quantile(Count, 0.025),
+      Upper = quantile(Count, 0.975),
+      .groups = "drop"
+    ) %>%
+    mutate(Source = source_name)
+}
+
+# Apply to all bootstrapped data
+df_obs   <- summarise_boot(boot_observed, "Observed")
+df_binom <- summarise_boot(boot_binom, "Binomial")
+df_fixed <- summarise_boot(boot_fixed, "Fixed")
+
+
+# Keep mean, lower, and upper for each source
+all_summary <- bind_rows(df_obs, df_binom, df_fixed)
+all_summary$Bin <- factor(all_summary$Bin, levels = labels)
+all_summary$Source <- factor(all_summary$Source, levels = c("Observed", "Fixed", "Binomial"))
+
+# Pivot to wide format including CI
+mean_wide_with_ci <- all_summary %>%
+  pivot_wider(
+    id_cols = Bin,
+    names_from = Source,
+    values_from = c(Mean, Lower, Upper),
+    names_glue = "{Source}_{.value}"
+  ) %>%
+  mutate(
+    Diff_vs_Fixed = Observed_Mean - Fixed_Mean,
+    Diff_vs_Binom = Observed_Mean - Binomial_Mean
+  ) %>%
+  select(
+    Bin,
+    starts_with("Observed_"),
+    starts_with("Fixed_"),
+    starts_with("Binomial_"),
+    Diff_vs_Fixed,
+    Diff_vs_Binom
+  )
+
+# Arrange nicely
+mean_wide_with_ci <- mean_wide_with_ci %>% arrange(Bin)
+
+# Optional: round for display
+mean_wide_with_ci <- mean_wide_with_ci %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+# Create the clean version
+
+clean_table <- mean_wide_with_ci %>%
+  mutate(
+    Observed = glue("{Observed_Mean} ({Observed_Lower}–{Observed_Upper})"),
+    Fixed    = glue("{Fixed_Mean} ({Fixed_Lower}–{Fixed_Upper})"),
+    Binomial = glue("{Binomial_Mean} ({Binomial_Lower}–{Binomial_Upper})")
+  ) %>%
+  select(Bin, Observed, Fixed, Binomial, Diff_vs_Fixed, Diff_vs_Binom)
+
+write.csv(clean_table, "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure4/Table2-bootstrapped_mean_bin_counts_comparison_nofree.csv",  row.names = FALSE)
+
+```
+
+### Plots of Bootstrapped Clone Distributions
+```{r}
+# Convert bootstraps to long format
+boot_to_long <- function(mat, source_name) {
+  as_tibble(mat) %>%
+    setNames(labels) %>%
+    pivot_longer(cols = everything(), names_to = "Bin", values_to = "Count") %>%
+    mutate(Source = source_name)
+}
+
+# Combine all into one long tibble
+all_long <- bind_rows(
+  boot_to_long(boot_observed, "Observed"),
+  boot_to_long(boot_binom, "Binomial"),
+  boot_to_long(boot_fixed, "Fixed")
+)
+
+all_long$Bin <- factor(all_long$Bin, levels = labels)
+all_long$Source <- factor(all_long$Source, levels = c("Observed", "Fixed", "Binomial"))
+
+#FIlter just some models
+all_long <- all_long %>% filter(Source %in% c("Observed", "Fixed"))
+
+# Observed points for overlay
+observed_df <- tibble(Bin = factor(labels, levels = labels), Count = observed)
+
+ggplot(all_long, aes(x = Bin, y = Count, fill = Source)) +
+  geom_boxplot(position = position_dodge(width = 0.9), outlier.shape = NA, alpha = 0.6) +
+  # geom_point(data = observed_df, aes(x = Bin, y = Count), 
+  #            color = "black", shape = 18, size = 2, inherit.aes = FALSE) +
+  labs(
+    title = "Boxplot: Bootstrap Clone Count Distributions",
+    x = "Clone Ratio Bin (dI4 / (dI4 + dI5))",
+    y = "Clone Count"
+  ) +
+  scale_fill_manual(values = c(
+    "Observed" = "grey60", "Binomial" = "white", 
+    "Fixed" = "turquoise3")) +
+  theme_minimal(base_size = 14)
+
+ggsave(filename = "bootstrap_boxplot_only_fixed.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 16 ,
+    height = 12, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```

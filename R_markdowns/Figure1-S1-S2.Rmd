@@ -20,69 +20,6 @@ library(ggrepel)
 
 ```
 
-#Color palettes
-```{r}
-
-mycolors <- c(
-  "dodgerblue2",
-  "darkgreen",
-  "#FF7F00", # orange
-  "#6A3D9A", # purple
-  "skyblue2", 
-  "black", 
-  "#E31A1C", # red
-  "yellow",
-  "#FB9A99", # lt pink
-  "palegreen3",
-  "#CAB2D6", # lt purple
-  "#FDBF6F", # lt orange
-  "forestgreen", 
-  "khaki2",
-  "maroon", 
-  "orchid1", 
-  "deeppink1", 
-  "darkblue", 
-  "steelblue4",
-  "green",
-  "sienna",
-  "turquoise",
-  "tan",
-  "darkolivegreen",
-  "darkolivegreen1"
-)
-
-pie(rep(1, 25), col = mycolors)
-
-
-
-colors = c("darkblue", "forestgreen", "deeppink1" )
-
-cols_clones = c("darkblue", "forestgreen", "orchid1", "black", "#FF7F00" )
-
-
-cols_clones <- DiscretePalette(50, palette = "alphabet2")
-
-pie(rep(1, 25), col = cols_clones)
-
-c25 <- c(
-  "dodgerblue2", "#E31A1C", # red
-  "green4",
-  "#6A3D9A", # purple
-  "#FF7F00", # orange
-  "black", "gold1",
-  "skyblue2", "#FB9A99", # lt pink
-  "palegreen2",
-  "#CAB2D6", # lt purple
-  "#FDBF6F", # lt orange
-  "gray70", "khaki2",
-  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
-  "darkturquoise", "green1", "yellow4", "yellow3",
-  "darkorange4", "brown", "darkblue"
-)
-
-
-
-```
 
 #PATHS
 ```{r}
@@ -539,38 +476,6 @@ for (gene in markers) {
 
 ```
 
-#Genes across timepoints VlnPlots
-```{r}
-# Your list of gene symbols
-gene_symbols <- c("FOXJ1", "GFAP")  
-
-# Loop through each gene
-for (gene_symbol in gene_symbols) {
-
-  # Generate the violin plot with box overlay
-  p <- VlnPlot(seur_obj,
-               features = gene_symbol,  # use symbol directly
-               group.by = "experiment",
-               pt.size = 0.5) +
-    geom_boxplot(width = 0.1, outlier.shape = NA) +
-    theme_minimal() +
-    ggtitle(gene_symbol) +
-    NoLegend()
-
-  # Save the plot
-  ggsave(filename = paste0(gene_symbol, "_vlnplot.pdf"),
-         plot = p,
-         path = plots,  # make sure 'plots' exists or define it
-         scale = 1,
-         width = 17,
-         height = 16,
-         units = "cm",
-         dpi = 300,
-         bg = "transparent")
-}
-
-
-```
 #Dotplots genes
 ##Progenitors
 ```{r}
@@ -663,10 +568,43 @@ ggsave(filename = "dotplot_Delile_neurons_genes.pdf", plot = last_plot(), path =
 ```
 
 
+#Genes across timepoints VlnPlots
+```{r}
+# Your list of gene symbols
+gene_symbols <- c("FOXJ1", "GFAP")  
+
+# Loop through each gene
+for (gene_symbol in gene_symbols) {
+
+  # Generate the violin plot with box overlay
+  p <- VlnPlot(seur_obj,
+               features = gene_symbol,  # use symbol directly
+               group.by = "experiment",
+               pt.size = 0.5) +
+    geom_boxplot(width = 0.1, outlier.shape = NA) +
+    theme_minimal() +
+    ggtitle(gene_symbol) +
+    NoLegend()
+
+  # Save the plot
+  ggsave(filename = paste0(gene_symbol, "_vlnplot.pdf"),
+         plot = p,
+         path = plots,  # make sure 'plots' exists or define it
+         scale = 1,
+         width = 17,
+         height = 16,
+         units = "cm",
+         dpi = 300,
+         bg = "transparent")
+}
+
+
+```
+
 #####
 
 #FIG.S2
-## Multicell clones UMAPs Fig.S2C
+
 #Pie chart number of cells in multicellular clones
 ```{r}
 # Step 1: Prepare data (removing NA)
@@ -844,133 +782,7 @@ ggsave(filename = "n_cells_multicell_clones_vln.pdf", plot = last_plot(), path =
 ```
 
 
-Top 5 clones spanning across cell types
-```{r}
-# Step 1: Summarize clones by number of cell types and total cells
-clones_clusters <- seur_obj@meta.data %>%
-  filter(!is.na(exp_clone), !is.na(Cell.type)) %>%
-  group_by(exp_clone) %>%
-  summarise(
-    nb_clusters = n_distinct(Cell.type),
-    tot_nb_cells = n(),
-    .groups = "drop"
-  )
 
-# Step 2: Select top 5 clones present in >2 cell types and >2 cells
-top5_clones <- clones_clusters %>%
-  filter(nb_clusters > 2, tot_nb_cells > 2) %>%
-  arrange(desc(nb_clusters), desc(tot_nb_cells)) %>%
-  slice_head(n = 5) %>%
-  pull(exp_clone)
-
-# Step 3: Optional — get distribution of cell types for inspection
-top5_clone_celltypes <- seur_obj@meta.data %>%
-  as_tibble(rownames = "cell_id") %>%
-  filter(exp_clone %in% top5_clones) %>%
-  group_by(exp_clone, Cell.type) %>%
-  summarise(n_cells = n(), .groups = "drop") %>%
-  arrange(exp_clone, desc(n_cells))
-
-# Step 4: Extract cell IDs per clone
-cells_in_top5 <- seur_obj@meta.data %>%
-  as_tibble(rownames = "cell_id") %>%
-  filter(exp_clone %in% top5_clones) %>%
-  group_by(exp_clone) %>%
-  group_split() %>%
-  set_names(map_chr(., ~ unique(.x$exp_clone))) %>%
-  map(~ .x$cell_id)
-
-# Step 5: Define highlight colors
-cols_clones <- RColorBrewer::brewer.pal(5, "Set1")
-
-# Step 6: Plot with clones highlighted
-DimPlot(
-  seur_obj,
-  pt.size = 0.7,
-  label = FALSE,
-  cells.highlight = cells_in_top5,
-  cols.highlight = cols_clones,
-  sizes.highlight = 1
-) +
-  labs(title = "Top 5 clones spanning >2 cell types") +
-  theme_classic() +
-  theme(
-    axis.text = element_blank(),
-    axis.ticks = element_blank()
-  )
-
-# Step 7: Save (optional)
-ggsave(
-  filename = "top5_clones_more_than_2celltypes.png",
-  plot = last_plot(),
-  path = plots,
-  scale = 1,
-  width = 21,
-  height = 16,
-  units = "cm",
-  dpi = 300,
-  bg = "transparent"
-)
-
-
-```
-
-
-#Upset plot fine
-```{r}
-
-seur_obj@meta.data <- seur_obj@meta.data %>%
-  mutate(cell_category = case_when(
-    Cell.type %in% c("RP", "dp1_2", "dpL", "dp6") ~ "Dorsal Progenitors",
-    Cell.type %in% c("p0", "p1", "p2", "pMN", "p3", "p3_FP", "FP") ~ "Ventral Progenitors",
-    Cell.type %in% c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6") ~ "Dorsal Neurons",
-    Cell.type %in% c("V0", "V1", "V2a", "V2b", "MN", "V3") ~ "Ventral Neurons",
-    Cell.type %in% c("OPCs") ~ "Glia"
-  ))
-
-table(seur_obj@meta.data$cell_category)
-
-
-
-library(ComplexUpset)
-
-upset_df <- seur_obj@meta.data %>%
-  filter(
-    !is.na(exp_clone),
-    !is.na(cell_category),
-    multi_cell_clone == "multi-cell_clone"
-  ) %>%
-  distinct(exp_clone, cell_category) %>%
-  mutate(present = 1) %>%
-  pivot_wider(
-    names_from = cell_category,
-    values_from = present,
-    values_fill = list(present = 0)
-  )
-
-
-# Plot with custom color palette and clean theme
-
-upset(
-  upset_df,
-  intersect = c("Glia", "Dorsal Neurons", "Dorsal Progenitors", "Ventral Neurons", "Ventral Progenitors"),  # Custom order
-  name = "Clonal Sharing",
-  set_sizes = FALSE,
-  base_annotations = list(
-    'Intersection size' = intersection_size()
-  )
-)
-
-
-ggsave(filename = "Upset_plots_DV_cat.pdf", plot = last_plot(), path = plots,
-    scale = 1, width = 20 ,
-    height = 17, units = "cm",
-    dpi = 300, bg = "transparent")
-
-
-
-
-```
 
 #Clonal size dorsal vs ventral
 ##Dataset
@@ -1117,4 +929,128 @@ ggsave(filename = "EMBRYO_IF_clone_size_HH28_dorsal_ventral.pdf", plot = last_pl
 
 ```
 
+#Top 5 clones spanning across cell types
+```{r}
+# Step 1: Summarize clones by number of cell types and total cells
+clones_clusters <- seur_obj@meta.data %>%
+  filter(!is.na(exp_clone), !is.na(Cell.type)) %>%
+  group_by(exp_clone) %>%
+  summarise(
+    nb_clusters = n_distinct(Cell.type),
+    tot_nb_cells = n(),
+    .groups = "drop"
+  )
 
+# Step 2: Select top 5 clones present in >2 cell types and >2 cells
+top5_clones <- clones_clusters %>%
+  filter(nb_clusters > 2, tot_nb_cells > 2) %>%
+  arrange(desc(nb_clusters), desc(tot_nb_cells)) %>%
+  slice_head(n = 5) %>%
+  pull(exp_clone)
+
+# Step 3: Optional — get distribution of cell types for inspection
+top5_clone_celltypes <- seur_obj@meta.data %>%
+  as_tibble(rownames = "cell_id") %>%
+  filter(exp_clone %in% top5_clones) %>%
+  group_by(exp_clone, Cell.type) %>%
+  summarise(n_cells = n(), .groups = "drop") %>%
+  arrange(exp_clone, desc(n_cells))
+
+# Step 4: Extract cell IDs per clone
+cells_in_top5 <- seur_obj@meta.data %>%
+  as_tibble(rownames = "cell_id") %>%
+  filter(exp_clone %in% top5_clones) %>%
+  group_by(exp_clone) %>%
+  group_split() %>%
+  set_names(map_chr(., ~ unique(.x$exp_clone))) %>%
+  map(~ .x$cell_id)
+
+# Step 5: Define highlight colors
+cols_clones <- RColorBrewer::brewer.pal(5, "Set1")
+
+# Step 6: Plot with clones highlighted
+DimPlot(
+  seur_obj,
+  pt.size = 0.7,
+  label = FALSE,
+  cells.highlight = cells_in_top5,
+  cols.highlight = cols_clones,
+  sizes.highlight = 1
+) +
+  labs(title = "Top 5 clones spanning >2 cell types") +
+  theme_classic() +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  )
+
+# Step 7: Save (optional)
+ggsave(
+  filename = "top5_clones_more_than_2celltypes.png",
+  plot = last_plot(),
+  path = plots,
+  scale = 1,
+  width = 21,
+  height = 16,
+  units = "cm",
+  dpi = 300,
+  bg = "transparent"
+)
+
+
+```
+
+
+#Upset plot fine
+```{r}
+
+seur_obj@meta.data <- seur_obj@meta.data %>%
+  mutate(cell_category = case_when(
+    Cell.type %in% c("RP", "dp1_2", "dpL", "dp6") ~ "Dorsal Progenitors",
+    Cell.type %in% c("p0", "p1", "p2", "pMN", "p3", "p3_FP", "FP") ~ "Ventral Progenitors",
+    Cell.type %in% c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6") ~ "Dorsal Neurons",
+    Cell.type %in% c("V0", "V1", "V2a", "V2b", "MN", "V3") ~ "Ventral Neurons",
+    Cell.type %in% c("OPCs") ~ "Glia"
+  ))
+
+table(seur_obj@meta.data$cell_category)
+
+
+
+library(ComplexUpset)
+
+upset_df <- seur_obj@meta.data %>%
+  filter(
+    !is.na(exp_clone),
+    !is.na(cell_category),
+    multi_cell_clone == "multi-cell_clone"
+  ) %>%
+  distinct(exp_clone, cell_category) %>%
+  mutate(present = 1) %>%
+  pivot_wider(
+    names_from = cell_category,
+    values_from = present,
+    values_fill = list(present = 0)
+  )
+
+
+# Plot with custom color palette and clean theme
+
+upset(
+  upset_df,
+  intersect = c("Glia", "Dorsal Neurons", "Dorsal Progenitors", "Ventral Neurons", "Ventral Progenitors"),  # Custom order
+  name = "Clonal Sharing",
+  set_sizes = FALSE,
+  base_annotations = list(
+    'Intersection size' = intersection_size()
+  )
+)
+
+
+ggsave(filename = "Upset_plots_DV_cat.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 20 ,
+    height = 17, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+```

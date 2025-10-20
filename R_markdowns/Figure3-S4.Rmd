@@ -20,73 +20,12 @@ library(ggrepel)
 library(ComplexUpset)
 ```
 
-#Color palettes
-```{r}
-
-mycolors <- c(
-  "dodgerblue2",
-  "darkgreen",
-  "#FF7F00", # orange
-  "#6A3D9A", # purple
-  "skyblue2", 
-  "black", 
-  "#E31A1C", # red
-  "yellow",
-  "#FB9A99", # lt pink
-  "palegreen3",
-  "#CAB2D6", # lt purple
-  "#FDBF6F", # lt orange
-  "forestgreen", 
-  "khaki2",
-  "maroon", 
-  "orchid1", 
-  "deeppink1", 
-  "darkblue", 
-  "steelblue4",
-  "green",
-  "sienna",
-  "turquoise",
-  "tan",
-  "darkolivegreen",
-  "darkolivegreen1"
-)
-
-pie(rep(1, 25), col = mycolors)
-
-
-
-colors = c("darkblue", "forestgreen", "deeppink1" )
-
-
-cols_clones <- DiscretePalette(25, palette = "alphabet2")
-
-pie(rep(1, 25), col = cols_clones)
-
-c25 <- c(
-  "dodgerblue2", "#E31A1C", # red
-  "green4",
-  "#6A3D9A", # purple
-  "#FF7F00", # orange
-  "black", "gold1",
-  "skyblue2", "#FB9A99", # lt pink
-  "palegreen2",
-  "#CAB2D6", # lt purple
-  "#FDBF6F", # lt orange
-  "gray70", "khaki2",
-  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
-  "darkturquoise", "green1", "yellow4", "yellow3",
-  "darkorange4", "brown", "darkblue"
-)
-
-
-
-```
 
 #PATHS
 ```{r}
 
 
-plots = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure2/v1examples/" 
+plots = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure3/" 
 
 data = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/data/"
 
@@ -162,7 +101,263 @@ seur_obj <- AddMetaData(seur_obj, metadata = meta_with_clone_status$multi_cell_c
 
 
 
-Fig. 2I
+#Fig. 3
+
+#V0
+##Assign Excit or Inhib label
+```{r}
+neurons <- c("dI1", "dI2","dI3","dI4_dILA", "dI5_dILB", "Immature V0-dI6-V1", "dI6", "V0", "V1", "V2a", "V2b", "MN", "V3")
+
+# Initialise the label
+seur_obj$E_I_label <- NA
+
+# Only assign E/I labels within neurons
+is_neuron <- seur_obj$Cell.type %in% neurons
+
+# Expression thresholds (change threshold here if needed)
+exc_expr <- FetchData(seur_obj, vars = c("SLC17A6")) > 0
+inh_expr <- FetchData(seur_obj, vars = c("SLC32A1", "GAD1", "SLC6A5")) > 0
+
+# Logical vector for expression detection
+has_exc <- apply(exc_expr, 1, any)
+has_inh <- apply(inh_expr, 1, any)
+
+# Assign labels
+seur_obj$E_I_label[is_neuron & has_exc & !has_inh] <- "E"
+seur_obj$E_I_label[is_neuron & has_inh & !has_exc] <- "I"
+seur_obj$E_I_label[is_neuron & has_exc & has_inh]  <- "Ambiguous"
+
+# Check summary table
+table(seur_obj@meta.data$E_I_label, useNA = "ifany")
+
+```
+
+
+
+```{r}
+# Create new column for V0 subtype (default NA)
+seur_obj$V0_subtype <- NA
+
+# Identify V0 cells
+is_V0 <- seur_obj$Cell.type == "V0"
+
+# Assign subtypes based on E/I label
+seur_obj$V0_subtype[is_V0 & seur_obj$E_I_label == "E"] <- "V0v"
+seur_obj$V0_subtype[is_V0 & seur_obj$E_I_label == "I"] <- "V0D"
+
+# Check the result
+table(seur_obj$V0_subtype, useNA = "ifany")
+
+FeaturePlot(seur_obj, features = c("EVX1", "PAX2", "SLC17A6", "SLC32A1"), cells = WhichCells(seur_obj, expression = Cell.type == "V0"))
+ggsave(filename = "Featureplot_V0_subtypes.png", plot = last_plot(), path = plots,
+    scale = 1, width = 20 ,
+    height = 17, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+```
+
+
+
+```{r}
+# Subset to multi-cell clones
+multi_clones <- seur_obj@meta.data %>%
+  filter(!is.na(exp_clone), multi_cell_clone == "multi-cell_clone")
+
+# Count how many subtypes per clone
+diversity_df <- multi_clones %>%
+  filter(!is.na(V0_subtype)) %>%
+  group_by(exp_clone) %>%
+  summarise(
+    n_v0_cells = n(),
+    n_subtypes = n_distinct(V0_subtype),
+    .groups = "drop"
+  )
+
+print(diversity_df)
+
+# Number of clones with more than one V0 subtype
+n_shared_clones <- diversity_df %>%
+  filter(n_subtypes > 1) %>%
+  nrow()
+
+# Print the result
+cat("Number of clones with both V0v and V0D:", n_shared_clones, "\n")
+
+```
+
+
+
+```{r}
+# Filter for V0 cells in multi-cell clones
+v0_multi <- seur_obj@meta.data %>%
+  filter(
+    !is.na(exp_clone),
+    multi_cell_clone == "multi-cell_clone",
+    Cell.type == "V0",
+    !is.na(V0_subtype)
+  ) %>%
+  distinct(exp_clone, V0_subtype) %>%  # One row per clone and subtype
+  mutate(present = 1) %>%
+  pivot_wider(
+    names_from = V0_subtype,
+    values_from = present,
+    values_fill = list(present = 0)
+  )
+
+# Classify clone composition
+v0_multi <- v0_multi %>%
+  mutate(
+    subtype_class = case_when(
+      V0v == 1 & V0D == 0 ~ "V0v only",
+      V0v == 0 & V0D == 1 ~ "V0D only",
+      V0v == 1 & V0D == 1 ~ "Both",
+      TRUE ~ "Other"
+    )
+  )
+
+# Plot upset
+
+upset(
+  v0_multi,
+  intersect = c("V0v", "V0D"),
+  name = "V0 subtype",
+  base_annotations = list(
+    'Intersection size' = intersection_size()
+  )
+)
+
+ggsave(filename = "Upset_V0_subtypes.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 22 ,
+    height = 17, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+
+
+#V2a V2b in clones
+```{r}
+# Filter for multi-cell clones with V2a or V2b
+v2_multi <- seur_obj@meta.data %>%
+  filter(
+    !is.na(exp_clone),
+    multi_cell_clone == "multi-cell_clone",
+    Cell.type %in% c("V2a", "V2b")
+  ) %>%
+  distinct(exp_clone, Cell.type) %>%
+  mutate(present = 1) %>%
+  pivot_wider(
+    names_from = Cell.type,
+    values_from = present,
+    values_fill = list(present = 0)
+  )
+
+# Plot UpSet for V2a/V2b composition in clones
+upset(
+  v2_multi,
+  intersect = c("V2a", "V2b"),
+  name = "V2 subtype",
+  base_annotations = list(
+    'Intersection size' = intersection_size()
+  )
+)
+
+ggsave(filename = "Upset_V2_subtypes.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 22 ,
+    height = 17, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+
+
+
+
+#UMAPs
+##UMAP waves
+```{r}
+
+# Get cells for each wave
+mid_cells <- WhichCells(seur_obj, expression = wave == "mid")
+late_cells <- WhichCells(seur_obj, expression = wave == "late")
+early_cells <- WhichCells(seur_obj, expression = wave == "early")
+
+# Named list of groups to highlight
+highlight_list <- list(early = early_cells, mid = mid_cells, late = late_cells)
+
+# Plot
+DimPlot(
+  seur_obj,
+  group.by = "wave",
+  pt.size = 1,
+  repel = TRUE,
+  dims = c(1, 2),
+  cells.highlight = highlight_list,
+  cols.highlight = c( "mid" = "#1f77b4", "late" = "#ff7f0e", "early" = "darkseagreen3"),  # distinct colors
+  cols = "grey80",  # non-highlighted cells
+  sizes.highlight = 1
+) +
+  coord_fixed(ratio = 1) +
+  scale_x_discrete(breaks = NULL) +
+  scale_y_discrete(breaks = NULL) +
+  theme(
+    legend.position = "right",
+    legend.key.size = unit(0.5, "cm"),
+    legend.text = element_text(size = 12)
+  )
+
+
+
+ggsave(filename = "umap-waves_all.png", plot = last_plot(), path = plots,
+    scale = 1, width = 21 ,
+    height = 18, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+#Upset plot waves 
+```{r}
+
+# Step 1: Relabel wave of OPC cells
+seur_obj$wave_OPC_masked <- ifelse(
+  seur_obj$Cell.type == "OPCs" & !is.na(seur_obj$wave),
+  paste0(as.character(seur_obj$wave), "-OPC"),
+  as.character(seur_obj$wave)
+)
+
+upset_df <- seur_obj@meta.data %>%
+  filter(
+    !is.na(exp_clone),
+    wave_OPC_masked %in% c("early", "mid", "late"),  # exclude any *-OPC
+    multi_cell_clone == "multi-cell_clone"
+  ) %>%
+  distinct(exp_clone, wave_OPC_masked) %>%
+  mutate(present = 1) %>%
+  pivot_wider(
+    names_from = wave_OPC_masked,
+    values_from = present,
+    values_fill = list(present = 0)
+  )
+
+upset(
+  upset_df,
+  intersect = c("early", "mid", "late"),
+  name = "Clonal Sharing",
+  set_sizes = FALSE,
+  base_annotations = list(
+    'Intersection size' = intersection_size()
+  )
+)
+
+ggsave(filename = "Upset_plots_waves_noOPCs.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 20 ,
+    height = 17, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
+
+#Plot clones in OPC cluster
 ##Set new colors
 ```{r}
 
@@ -236,98 +431,13 @@ subset_colors <- setNames(colors_ids_clones, celltype_order)
 
 ```
 
-#UMAPs
-```{r fig.height=16, fig.width=20}
-Idents(seur_obj) <- seur_obj$Cell.type
-
-
-# Step 1: Define the cell types you want to highlight
-highlight_types <- c("p2", "pMN", "p3", "OPCs", "V2a", "V2b", "MN")
-
-# Step 2: Create a named list of cell IDs for each type
-cells_by_type <- lapply(highlight_types, function(ct) {
-  WhichCells(seur_obj, idents = ct)
-})
-names(cells_by_type) <- highlight_types
-
-highlight_types == names(cells_by_type)
-
-# Step 3: Assign one color per cell type (must match length)
-highlight_colors <- c(
-    "chartreuse3",   # V2b
-    "darkseagreen",  # V2a
-    "dodgerblue4",   # pMN
-    "blue",          # p3
- "midnightblue",  # p2
-  "darkorchid4",  # OPCs
-    "darkgreen"     # MN
-)
-
-# Step 4: Plot all cells, highlight selected ones in color
-DimPlot(
-  seur_obj,
-  pt.size = 1,
-  label = FALSE,
-  repel = TRUE,
-  dims = c(1, 2),
-  cells.highlight = cells_by_type,
-  cols.highlight = highlight_colors,
-  sizes.highlight = 1.5
-) +
-  NoLegend() +
-  coord_fixed(ratio = 1) +
-  scale_x_discrete(breaks = NULL) +
-  scale_y_discrete(breaks = NULL)
-
-
-
-#Plot for normal UMAP with cell type names
-
-# Ensure Cell.type follows the specified order
-seur_obj$Cell.type <- factor(seur_obj$Cell.type, levels = celltype_order)
-seur_obj <- SetIdent(seur_obj, value = seur_obj@meta.data$Cell.type)
-
-
-#with degrading colours
-DimPlot(seur_obj,
-            label = F,
-        pt.size = 1.5,
-        repel = T,
-        dims = c(1, 2)
-        ) +
-      # NoLegend() +
-      coord_fixed(ratio = 1) +
-      scale_x_discrete(breaks = NULL) +
-      scale_y_discrete(breaks = NULL) +
-      scale_color_manual(values = cell_type_colors) 
-      # guides(color = guide_legend(override.aes = list(size = 4))) + # Adjust legend appearance if needed
-      # theme(
-      #   legend.position = "right",  # Forces legend to stay in a fixed position
-      #   legend.key.size = unit(0.5, "cm"),  # Standardize legend key size
-      #   legend.text = element_text(size = 12)  # Standardize legend text size
-      # )
-
-
-
-ggsave(filename = "umap-sub-colors-pMN-clones.png", plot = last_plot(), path = plots,
-    scale = 1, width = 23 ,
-    height = 23, units = "cm",
-    dpi = 300, bg = "transparent")
-
-
-
-
-
-```
-
-
-#Plot clones across clusters1
+##Plot clones in OPC cluster
 ```{r}
 
 resolution = "Cell.type"
 # umap = "scVI_umap"
 
-clusters = c("OPCs", "pMN")
+clusters = c("OPCs")
 
 
 for (cluster in clusters){
@@ -382,167 +492,110 @@ ggsave(filename = paste0("Clones_in_cluster_",cluster, ".png"), plot = last_plot
 ```
 
 
-#Upset plot waves Fig2I
-```{r}
 
-# Step 1: Relabel wave of OPC cells
-seur_obj$wave_OPC_masked <- ifelse(
-  seur_obj$Cell.type == "OPCs" & !is.na(seur_obj$wave),
-  paste0(as.character(seur_obj$wave), "-OPC"),
-  as.character(seur_obj$wave)
-)
 
-upset_df <- seur_obj@meta.data %>%
-  filter(
-    !is.na(exp_clone),
-    wave_OPC_masked %in% c("early", "mid", "late"),  # exclude any *-OPC
-    multi_cell_clone == "multi-cell_clone"
-  ) %>%
-  distinct(exp_clone, wave_OPC_masked) %>%
-  mutate(present = 1) %>%
-  pivot_wider(
-    names_from = wave_OPC_masked,
-    values_from = present,
-    values_fill = list(present = 0)
-  )
-
-upset(
-  upset_df,
-  intersect = c("early", "mid", "late"),
-  name = "Clonal Sharing",
-  set_sizes = FALSE,
-  base_annotations = list(
-    'Intersection size' = intersection_size()
-  )
-)
-
-ggsave(filename = "Upset_plots_waves_noOPCs.pdf", plot = last_plot(), path = plots,
-    scale = 1, width = 20 ,
-    height = 17, units = "cm",
-    dpi = 300, bg = "transparent")
-
-```
 
 #Fig.S4
-##Dotplots tTFs by experiment and wave Fig.S4A-B
+
+
+#FigS4B
 ```{r}
 
-# Define your gene symbols
-tTFs <- c("ARID3A", "ONECUT1", "ONECUT2", "ZFHX4", "ZFHX3","CRABP1", "NFIA","NFIB","NEUROD6", "NEUROD2")
+# Define neuron types (of two next subdivisions to sub_3)
+neurons <- c("dI3","dI4_dILA", "dI5_dILB", 
+             "dI6", "V0", "V1", "V2a", "V2b", "MN")
 
-# Set experiment as identity
-# Set the desired order for the experiment levels
-seur_obj$experiment <- factor(seur_obj$experiment, levels = c("HH35", "HH31","HH28"))
-Idents(seur_obj) <- seur_obj$experiment
-
-# DotPlot: % expressing cells across experiments
-DotPlot(seur_obj, features = tTFs) +
-  scale_size(range = c(0.5, 10)) +
-  scale_color_viridis_c(option = "cividis") +
-theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    axis.text.y = element_text(face = "bold")
-  ) +
-  labs(
-    x = "Experiment",
-    y = NULL,
-    size = "% Expressing",
-    color = "Avg Expr"
+# Filter meta.data for neurons in multi-cell clones with V0 subtype info
+meta <- seur_obj@meta.data %>%
+  filter(
+    Cell.type %in% neurons,
+    !is.na(exp_clone),
+    multi_cell_clone == "multi-cell_clone"
   )
 
-ggsave(filename = "dotplot_tTFs_by_exp.pdf", plot = last_plot(), path = plots,
-    scale = 1, width = 17 ,
-    height = 8, units = "cm",
-    dpi = 300, bg = "transparent")
+# Identify clones that contain V0D or V0v
+v0_clone_map <- meta %>%
+  filter(Cell.type == "V0", !is.na(V0_subtype)) %>%
+  distinct(exp_clone, V0_subtype)
+
+# Join back to all neuron cells in those clones
+cooccurrence_df <- meta %>%
+  select(-V0_subtype) %>%  # drop the NA-prone column
+  inner_join(v0_clone_map, by = "exp_clone") %>%
+  filter(Cell.type != "V0") 
+
+# 4. Count how many clones of each subtype co-occur with each other Cell.type
+cooccurrence_summary <- cooccurrence_df %>%
+  group_by(V0_subtype, Cell.type) %>%
+  summarise(clone_count = n_distinct(exp_clone), .groups = "drop")
+
+# 5. Get total number of clones per subtype (for normalisation)
+clone_totals <- v0_clone_map %>%
+  group_by(V0_subtype) %>%
+  summarise(total_clones = n_distinct(exp_clone), .groups = "drop")
+
+# 6. Merge and compute fraction
+plot_df <- cooccurrence_summary %>%
+  left_join(clone_totals, by = "V0_subtype") %>%
+  mutate(fraction = clone_count / total_clones)
 
 
-####
+# Merge V2a and V2b into a single "V2" label
+plot_df <- plot_df %>%
+  mutate(Cell.type = case_when(
+    Cell.type %in% c("V2a", "V2b") ~ "V2",
+    TRUE ~ Cell.type
+  )) %>%
+  group_by(V0_subtype, Cell.type) %>%
+  summarise(
+    clone_count = sum(clone_count),
+    total_clones = first(total_clones),
+    fraction = sum(clone_count) / first(total_clones),
+    .groups = "drop"
+  )
 
-# Step 1: Define correct wave order
-wave_order <- c( "multiple_pos", "neg", "unknown", "unassigned",  "late", "mid","early")
+# Updated order for y-axis after merging V2a and V2b into V2
+neurons_collapsed <- c("dI3", "dI4_dILA", "dI5_dILB", 
+                       "dI6", "V0", "V1", "V2", "MN")
 
-# Step 2: Fix wave column in meta.data
-seur_obj$wave <- as.character(seur_obj$wave)  # Drop factor encoding
-seur_obj$wave[is.na(seur_obj$wave)] <- "unassigned"
-seur_obj$wave <- factor(seur_obj$wave, levels = wave_order)  # Set correct order
+# Reverse to plot top-down in desired order
+plot_df$Cell.type <- factor(plot_df$Cell.type, levels = rev(neurons_collapsed))
 
-# Step 3: Set Seurat identities with factor order preserved
-Idents(seur_obj) <- seur_obj$wave  # Since it's now a factor with the right order, this works
-
-# Step 3: Generate DotPlot
-DotPlot(seur_obj, features = tTFs) +
-  scale_size(range = c(0.5, 10)) +
-  scale_color_viridis_c(option = "cividis") +
+ggplot(plot_df, aes(x = Cell.type, y = V0_subtype, size = fraction)) +
+  geom_point(shape = 21, fill = "steelblue", colour = "black") +
+  scale_size(range = c(2, 15)) +
+  labs(
+    title = "Neuron types co-occurring with V0v and V0D clones",
+    x = "V0 Subtype", y = "Co-occurring Cell Type", size = "Fraction"
+  ) +
   theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    axis.text.y = element_text(face = "bold")
-  ) +
-  labs(
-    x = "Wave",
-    y = NULL,
-    size = "% Expressing",
-    color = "Avg Expr"
-  )
-
-ggsave(filename = "dotplot_tTFs_by_wave.pdf", plot = last_plot(), path = plots,
-    scale = 1, width = 18 ,
-    height = 15, units = "cm",
-    dpi = 300, bg = "transparent")
-
-```
-
-##UMAP waves Fig.S4C
-```{r}
-
-# Get cells for each wave
-mid_cells <- WhichCells(seur_obj, expression = wave == "mid")
-late_cells <- WhichCells(seur_obj, expression = wave == "late")
-early_cells <- WhichCells(seur_obj, expression = wave == "early")
-
-# Named list of groups to highlight
-highlight_list <- list(early = early_cells, mid = mid_cells, late = late_cells)
-
-# Plot
-DimPlot(
-  seur_obj,
-  group.by = "wave",
-  pt.size = 1,
-  repel = TRUE,
-  dims = c(1, 2),
-  cells.highlight = highlight_list,
-  cols.highlight = c( "mid" = "#1f77b4", "late" = "#ff7f0e", "early" = "darkseagreen3"),  # distinct colors
-  cols = "grey80",  # non-highlighted cells
-  sizes.highlight = 1
-) +
-  coord_fixed(ratio = 1) +
-  scale_x_discrete(breaks = NULL) +
-  scale_y_discrete(breaks = NULL) +
-  theme(
-    legend.position = "right",
-    legend.key.size = unit(0.5, "cm"),
-    legend.text = element_text(size = 12)
-  )
+  theme(axis.text.y = element_text(size = 10)) +
+coord_fixed(ratio = 1) 
 
 
-
-ggsave(filename = "umap-waves_all.png", plot = last_plot(), path = plots,
-    scale = 1, width = 21 ,
-    height = 18, units = "cm",
-    dpi = 300, bg = "transparent")
+ggsave(
+  filename = "Clonal_relationships_V0_subtypes.pdf",
+  plot = last_plot(),
+  path = plots,
+  scale = 1,
+  width = 20,  # was 20
+  height = 12,  # was 12
+  units = "cm",
+  dpi = 300,
+  bg = "transparent"
+)
 
 ```
 
 
 
-#Renshaw cells connections Fig.S4G
-##Expression 
+#Renshaw cells connections Fig.S4A-G
+##Expression S4G
 ```{r}
 
 make_panelA_clone_tile_anywave <- function(seur_obj, clone_id,
-                                           early_markers = c("MAFA", "MAFB", "CALB1", "CALB2", "PVALB", "ONECUT1", "ONECUT2"),
-                                           late_markers  = c("FOXP1", "FOXP2", "POU6F2", "SP8", "OTP1", "ZFHX3", "ZFHX4", "NEUROD2", "NFIB"),
+                                           early_markers = c("MAFA", "MAFB", "ONECUT1", "ONECUT2"),
+                                           late_markers  = c("FOXP1", "FOXP2", "NFIB"),
                                            expr_slot = "data",
                                            low_col = "white", high_col = "black") {
 
@@ -628,19 +681,18 @@ ggsave(
 ```
 
 
-##Network graph
+##Network graph S4A
 ```{r}
 
-library(dplyr)
-library(tibble)
-library(ggplot2)
+v1_obj <- subset(seur_obj, subset = Cell.type == "V1")
+
 
 # --- settings ---
 geneA <- "ONECUT1"
 geneB <- "MAFB"
 expr_thresh <- 0.5
 min_v1_per_clone <- 2
-obj <- v1_obj  # or v1_obj_no12 if you removed cluster 12
+obj <- v1_obj  
 
 # --- identify Renshaw cells (double-positive) ---
 expr <- FetchData(obj, vars = c(geneA, geneB)) %>% rownames_to_column("cell")
@@ -744,5 +796,73 @@ ggsave(filename = "Network_graph_Renshaw.pdf", plot = last_plot(), path = plots,
     dpi = 300, bg = "transparent")
 ```
 
+##Dotplots tTFs by experiment and wave Fig.S4A-B
+```{r}
+
+# Define your gene symbols
+tTFs <- c("ARID3A", "ONECUT1", "ONECUT2", "ZFHX4", "ZFHX3","CRABP1", "NFIA","NFIB","NEUROD6", "NEUROD2")
+
+# Set experiment as identity
+# Set the desired order for the experiment levels
+seur_obj$experiment <- factor(seur_obj$experiment, levels = c("HH35", "HH31","HH28"))
+Idents(seur_obj) <- seur_obj$experiment
+
+# DotPlot: % expressing cells across experiments
+DotPlot(seur_obj, features = tTFs) +
+  scale_size(range = c(0.5, 10)) +
+  scale_color_viridis_c(option = "cividis") +
+theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_text(face = "bold")
+  ) +
+  labs(
+    x = "Experiment",
+    y = NULL,
+    size = "% Expressing",
+    color = "Avg Expr"
+  )
+
+ggsave(filename = "dotplot_tTFs_by_exp.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 17 ,
+    height = 8, units = "cm",
+    dpi = 300, bg = "transparent")
+
+
+####
+
+# Step 1: Define correct wave order
+wave_order <- c( "multiple_pos", "neg", "unknown", "unassigned",  "late", "mid","early")
+
+# Step 2: Fix wave column in meta.data
+seur_obj$wave <- as.character(seur_obj$wave)  # Drop factor encoding
+seur_obj$wave[is.na(seur_obj$wave)] <- "unassigned"
+seur_obj$wave <- factor(seur_obj$wave, levels = wave_order)  # Set correct order
+
+# Step 3: Set Seurat identities with factor order preserved
+Idents(seur_obj) <- seur_obj$wave  # Since it's now a factor with the right order, this works
+
+# Step 3: Generate DotPlot
+DotPlot(seur_obj, features = tTFs) +
+  scale_size(range = c(0.5, 10)) +
+  scale_color_viridis_c(option = "cividis") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_text(face = "bold")
+  ) +
+  labs(
+    x = "Wave",
+    y = NULL,
+    size = "% Expressing",
+    color = "Avg Expr"
+  )
+
+ggsave(filename = "dotplot_tTFs_by_wave.pdf", plot = last_plot(), path = plots,
+    scale = 1, width = 18 ,
+    height = 15, units = "cm",
+    dpi = 300, bg = "transparent")
+
+```
 
 
