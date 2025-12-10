@@ -42,17 +42,28 @@ The Github does not include:
 - larry_human.csv contains the info to run permutation_analysis.ipynb with human data
 
 ## Jupyter notebooks/python scripts execution order + explanation + INPUTs/OUTPUTs:
-```
-	1.	Preprocessing_chicken_data.ipynb OR Preprocessing_human_data.ipynb (preprocessing of single cell data: QC, clean up, preliminary clustering, excluding contaminating cell types) 
-  INPUT: cellranger output (specifically: filtered_feature_bc_matrix) OUTPUT: preprocessing_larry_*.h5ad 
-	2.	cesfw_chicken_data.py OR cesfw_human_data.py (extracts CESFW features from the data) 
-  INPUT: preprocessing_larry_*.h5ad OUTPUT: ESSs.npy, Used_Features.npy and EPs.npy
-	3.	CESFW_feature_selection_chicken_data.ipynb OR CESFW_feature_selection_human_data.ipynb (CESFW features are clustered and selected by the Jupyter notebooks scripts (CESF*.ipynb))
-  INPUT: ESSs.npy, Used_Features.npy, EPs.npy and preprocessing_larry_*.h5ad OUTPUT: selected_cesfw_features_*_data.npy
-	4.	Integration_chicken_data.ipynb OR Integration_human_data.ipynb (creates the final integrated h5ad files using SCVI and CESFW features)
-  INPUT: preprocessing_larry_*.h5ad, selected_cesfw_features_*_data.npy AND *_LARRY_*_clone_output.csv (deposited on GEO and obtained through nf-LARRY -see above- ) OUTPUT: larry_*.csv (metadata), preprocessing_larry_*_clusters.h5ad (final annotated object, soon available on GEO), optional: .csv to conver into Seurat object
-	5.	permutation_analysis.ipynb (that uses permutation.py) 
-  INPUT: larry_*.csv (metadata), permutation.py OUTPUT: lineage correlation matrix plots
-	6.	wave_analysis.ipynb (for temporal wave analyses only)
-  INPUT: larry_*.csv (metadata), permutation.py OUTPUT: lineage correlation matrix plots
-```
+
+1. Preprocessing_chicken_data.ipynb OR Preprocessing_human_data.ipynb (preprocessing of single cell data: QC, clean up, preliminary clustering, excluding contaminating cell types)  
+   INPUT: cellranger output (specifically: `filtered_feature_bc_matrix`)  
+   OUTPUT: `preprocessing_larry_*.h5ad`
+
+2. cesfw_chicken_data.py OR cesfw_human_data.py (extracts CESFW features from the data)  
+   INPUT: `preprocessing_larry_*.h5ad`  
+   OUTPUT: `ESSs.npy`, `Used_Features.npy`, `EPs.npy`
+
+3. CESFW_feature_selection_chicken_data.ipynb OR CESFW_feature_selection_human_data.ipynb (CESFW features are clustered and selected by the Jupyter notebooks scripts)  
+   INPUT: `ESSs.npy`, `Used_Features.npy`, `EPs.npy`, `preprocessing_larry_*.h5ad`  
+   OUTPUT: `selected_cesfw_features_*_data.npy`
+
+4. Integration_chicken_data.ipynb OR Integration_human_data.ipynb (creates the final integrated h5ad files using SCVI and CESFW features)  
+   INPUT: `preprocessing_larry_*.h5ad`, `selected_cesfw_features_*_data.npy` and `*_LARRY_*_clone_output.csv` (from nf-LARRY, deposited on GEO)  
+   OUTPUT: `larry_*.csv` (metadata), `preprocessing_larry_*_clusters.h5ad` (final annotated object), optional: `.csv` to convert into Seurat object
+
+5. permutation_analysis.ipynb (uses permutation.py)  
+   INPUT: `larry_*.csv`, `permutation.py`  
+   OUTPUT: lineage correlation matrix plots
+
+6. wave_analysis.ipynb (for temporal wave analyses only)  
+   INPUT: `larry_*.csv`, `permutation.py`  
+   OUTPUT: lineage correlation matrix plots
+
