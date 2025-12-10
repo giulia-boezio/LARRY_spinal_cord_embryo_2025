@@ -1,0 +1,59 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: Neural tube lineage data (chicken/human)
+message: >-
+  If you use this dataset, please cite it using the metadata
+  from this file.
+type: dataset
+authors:
+  - given-names: Giulia
+    family-names: Boezio
+    email: giulia.boezio@crick.ac.uk
+    affiliation: Francis Crick Institute
+    orcid: 'https://orcid.org/0000-0002-7776-7985'
+  - given-names: Jasper
+    family-names: Depotter
+    affiliation: Francis Crick Institute
+  - given-names: James
+    family-names: Briscoe
+    affiliation: The Francis Crick Institute
+identifiers:
+  - type: doi
+    value: 10.1101/2025.10.24.684328v1.full
+    description: biorxiv paper
+repository-code: >-
+  https://github.com/giulia-boezio/LARRY_spinal_cord_embryo_2025
+abstract: >-
+  The formation of neural circuits depends on the precise
+  spatial and temporal organisation of neuronal populations
+  during development. In the vertebrate spinal cord,
+  progenitors are patterned into molecularly defined
+  domains, but how lineage relationships shape neuronal
+  diversity and function has remained unclear. Here, we
+  combine genomic barcoding with single- cell RNA sequencing
+  in chick and human embryos to generate cell-type-resolved
+  clonal maps. We find that spinal neurogenesis follows a
+  hierarchical organisation in which the neural tube first
+  partitions into five broad subdivisions that resolve into
+  the eleven progenitor domains generating the cardinal
+  neuronal classes. This bifurcating architecture implies a
+  patterning mechanism of sequential binary decisions. The
+  most prominent lineage restriction occurs at the embryonic
+  alar-basal boundary, separating sensory-processing from
+  motor-control circuits. Individual progenitors generate
+  neurons across multiple temporal waves while remaining
+  constrained within their lineage subdivision,
+  demonstrating persistence of spatial identity despite
+  temporal competence changes. Among sensory populations, we
+  identify two developmental routes, via unifated or bifated
+  progenitors, to pain- and itch-processing interneurons.
+  These principles are conserved between chick and human,
+  with clonal analysis in human embryos revealing that most
+  fate choices are resolved by six weeks post-conception.
+  Together, these findings provide a framework for spinal
+  cord development and reveal lineage compartmentalisation
+  as a fundamental principle in neural circuit assembly and
+  evolution.
+license: MIT
