@@ -42,7 +42,7 @@ The Github does not include:
 - larry_human.csv contains the info to run permutation_analysis.ipynb with human data
 
 ## Jupyter notebooks/python scripts execution order + explanation + INPUTs/OUTPUTs:
-
+```
 	1.	Preprocessing_chicken_data.ipynb OR Preprocessing_human_data.ipynb (preprocessing of single cell data: QC, clean up, preliminary clustering, excluding contaminating cell types) 
   INPUT: cellranger output (specifically: filtered_feature_bc_matrix) OUTPUT: preprocessing_larry_*.h5ad 
 	2.	cesfw_chicken_data.py OR cesfw_human_data.py (extracts CESFW features from the data) 
@@ -55,4 +55,4 @@ The Github does not include:
   INPUT: larry_*.csv (metadata), permutation.py OUTPUT: lineage correlation matrix plots
 	6.	wave_analysis.ipynb (for temporal wave analyses only)
   INPUT: larry_*.csv (metadata), permutation.py OUTPUT: lineage correlation matrix plots
-
+```
