@@ -4,6 +4,7 @@ Scripts for analysis in Boezio et al (2025)
 This repository contains the code, data references, and notebooks used in the analyses for the paper:
 
 Hierarchical lineage architecture of human and avian spinal cord revealed by single-cell genomic barcoding
+
 Giulia L. M. Boezio1,*, Jasper R. L. Depotter1, Arthur Radley1, Thomas J. R. Frith1, Dimitris Volteras, Ashley Libby, Stephanie Strohbuecker1, Ana C. Cunha1, Michael Howell1, James Briscoe1,*
 
 https://www.biorxiv.org/content/10.1101/2025.10.24.684328v1.full
