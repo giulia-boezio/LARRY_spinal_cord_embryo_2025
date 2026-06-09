@@ -4,14 +4,28 @@ output: html_document
 date: '2025-04-24'
 ---
 
+This notebook converts the exported AnnData matrices from Python preprocessing into a normalised Seurat object for the chicken spinal cord LARRY dataset, so that downstream R analyses can use a single RDS file rather than raw flat files.
+
+**Data required:**
+
+- `preprocessing_larry_chicken_matrix.mtx` — sparse count matrix (cells × genes)
+- `preprocessing_larry_chicken_genes.csv` — gene names
+- `preprocessing_larry_chicken_cells.csv` — cell barcodes
+- `preprocessing_larry_chicken_meta.csv` — per-cell metadata (includes `wave`, `cell_type`, etc.)
+- `preprocessing_larry_chicken_umap.csv` — pre-computed 3-D UMAP coordinates
+
+**Outputs:**
+
+- `preprocessing_larry_chicken_clusters_newwave.rds` — normalised, scaled Seurat object with UMAP embedding and metadata attached
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## Libraries
 
-
 ```{r libraries}
+# Load required packages for Seurat object creation, data wrangling, and sparse matrix I/O
 library(Seurat)
 library(tidyverse)
 library(Matrix)
@@ -20,6 +34,7 @@ library(Matrix)
 ## Paths
 
 ```{r paths}
+# Define input (anndata_seurat export) and output (seurat RDS) directories
 anndata_seurat_path = "/camp/home/depottj/working/depottj/projects/briscoej/giulia.boezio/LARRY_spinal_cord/data/anndata_seurat"
 seurat_path = "/camp/home/depottj/working/depottj/projects/briscoej/giulia.boezio/LARRY_spinal_cord/data/seurat"
 ```
@@ -27,6 +42,7 @@ seurat_path = "/camp/home/depottj/working/depottj/projects/briscoej/giulia.boezi
 ## Make Seurat object
 
 ```{r make_seurat_object}
+# Read count matrix, gene names, and cell barcodes then assemble a Seurat object
 file_name = "chicken"
 
 #Read in Count matrix
@@ -45,8 +61,8 @@ rownames(counts) <- cell_names
 seurat_obj <- CreateSeuratObject(counts = t(counts))
 ```
 
-```{r}
-#Read in meta data
+```{r add_metadata}
+# Read per-cell metadata from CSV and attach it to the Seurat object
 meta_data <- read_csv(file.path(anndata_seurat_path , str_c("preprocessing_larry_" , file_name , "_meta.csv"))) %>%
               column_to_rownames(var = "index")
 
@@ -54,11 +70,14 @@ seurat_obj@meta.data <- meta_data
 ```
 
 ```{r normalise_scale}
+# Log-normalise counts and z-score scale gene expression across cells
 seurat_obj_norm_scale <- seurat_obj %>%
   NormalizeData(normalization.method = "LogNormalize" , scale.factor = 10000) %>%
   ScaleData()
 ```
+
 ```{r umap}
+# Import pre-computed 3-D UMAP coordinates from Python and embed them in the Seurat object
 umap_coord <- read_csv(file.path(anndata_seurat_path , str_c("preprocessing_larry_" , file_name , "_umap.csv")), col_names = FALSE)
 colnames(umap_coord) <- c("UMAP_1","UMAP_2","UMAP_3")
 rownames(umap_coord) <- cell_names
@@ -76,7 +95,8 @@ DimPlot(seurat_obj_norm_scale, reduction = "umap", group.by = "wave")
 DimPlot(seurat_obj_norm_scale, reduction = "umap", group.by = "cell_type")
 ```
 
-```{r write_wout}
+```{r write_output}
+# Save the finalised Seurat object to disk as an RDS file
 saveRDS(seurat_obj_norm_scale, file = file.path(seurat_path , str_c("preprocessing_larry_" , file_name , "_clusters_newwave.rds")))
 
 ```

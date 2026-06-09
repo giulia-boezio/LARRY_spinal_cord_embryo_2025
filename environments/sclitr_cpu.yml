@@ -1,0 +1,32 @@
+name: sclitr_cpu
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pip
+
+  # core scientific stack
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+
+  # single-cell ecosystem (minimal but sufficient)
+  - scanpy
+  - anndata
+  - scikit-learn
+  - pynndescent
+
+  # pytorch (CPU)
+  - pytorch
+
+  # jupyter kernel support
+  - ipykernel
+
+  # pip-installed packages
+  - pip:
+      - sclitr
+      - geosketch
+      - textalloc
+      - mpltern
+      - catboost

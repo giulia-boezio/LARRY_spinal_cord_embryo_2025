@@ -1,0 +1,854 @@
+---
+title: "injHH7-collHH18 LARRY NT — Cluster Inspection & Annotation"
+author: "Giulia"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+This notebook covers cluster inspection and cell type annotation for the injHH7-collHH18 chicken spinal cord LARRY dataset (injHH7-collHH18 dataset; injection at HH7-9, collection at HH18).
+
+**Data required:**
+
+- `LARRY_NT_integrated_07-09-2025_annotated.rds` — integrated Seurat object with existing annotation columns (primary input)
+- `LARRY_integrated_switched_somites_07-09-2025.rds` — full (pre-subset) RDS used to transfer annotation columns (used in the one-time filtering step)
+
+**Outputs:**
+
+- `LARRY_NT_integrated_07-09-2025_filtered_annotated.rds` — NT-only Seurat object after removing non-NT germ layers and partially-retained clusters
+- `LARRY_NT_integrated_07-09-2025_annotated.rds` — updated RDS with `cell_type_fine`, `cell_type_coarse`, and `cell_type_collapsed` columns written back
+- `LARRY_NT_integrated_07-09-2025_annotated_metadata.csv` — flat metadata export (clone, somites, annotation columns)
+- `Table1_clone_QC_injHH7-collHH18.xlsx` — per-sample clone QC summary
+- `Table2_clone_domain_diversity_injHH7-collHH18.xlsx` — progenitor domain fate and multi-domain combo tables
+- `LARRY_detection_summary_per_sample_injHH7-collHH18.csv` — LARRY detection rates per cell type per sample
+- `LARRY_detection_summary_overall_injHH7-collHH18.csv` — LARRY detection rates per cell type overall
+- `clone_size_histogram.pdf` — clone size distribution plot
+- `LARRY_detection_barplot.pdf` — stacked barplot of LARRY barcode detection rate
+- `UMAP-RNA_snn_res25-dims13.png` — UMAP coloured by clustering resolution 25
+- `Dotplot-res10.png` — DotPlot of marker genes at resolution 10
+- Individual FeaturePlot PNGs per marker gene (saved to plots directory)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Libraries
+```{r libs}
+# Load all required packages
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(tidyverse)
+library(scCustomize)
+library(ggplot2)
+library(ggrepel)
+
+```
+
+## Paths
+```{r paths}
+# Define input data and output plot directories
+data  <- "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/injHH7-collHH18_LARRY/data/"
+plots <- "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/injHH7-collHH18_LARRY/plots/"
+```
+
+## Load RDS
+```{r load}
+# Load the annotated integrated Seurat object and print metadata overview
+#seur_obj <- read_rds(file.path(data, "LARRY_NT_integrated_07-09-2025.rds"))
+
+seur_obj <- read_rds(file.path(data, "LARRY_NT_integrated_07-09-2025_annotated.rds"))
+
+DefaultAssay(seur_obj) <- "RNA"
+
+cat("=== Metadata columns ===\n"); print(colnames(seur_obj@meta.data))
+cat("=== Reductions ===\n");       print(names(seur_obj@reductions))
+cat("=== n cells ===\n");          print(ncol(seur_obj))
+```
+
+## Metadata setup
+```{r metadata}
+# Standardise metadata: rename clone column, derive experiment/samples_LARRY/clone_id_detected/multi_cell_clone
+# Rename clone → exp_clone if needed (fresh RDS has "clone")
+if ("clone" %in% colnames(seur_obj@meta.data)) {
+  seur_obj@meta.data$exp_clone <- seur_obj@meta.data$clone
+  seur_obj@meta.data$clone     <- NULL
+}
+
+# experiment: use somites column which already has correct labels
+seur_obj@meta.data$experiment <- seur_obj@meta.data$somites
+
+# samples_LARRY
+seur_obj@meta.data$samples_LARRY <- case_when(
+  seur_obj@meta.data$sample %in% c("LIB6512A4", "LIB6512A14") ~ "control",
+  seur_obj@meta.data$sample %in% c("LIB6512A1", "LIB6512A2", "LIB6512A3",
+                                   "LIB6512A10", "LIB6512A11", "LIB6512A12",
+                                   "LIB6512A13") ~ "LARRY",
+  TRUE ~ NA_character_
+)
+
+# clone_id_detected
+seur_obj$clone_id_detected <- case_when(
+  seur_obj$samples_LARRY == "control" ~ "control",
+  !is.na(seur_obj$exp_clone)          ~ "detected",
+  is.na(seur_obj$exp_clone)           ~ "not_detected",
+  TRUE                                ~ NA_character_
+)
+
+# multi_cell_clone (safe: named vector, no left_join)
+clone_size_lookup <- seur_obj@meta.data %>%
+  filter(!is.na(exp_clone)) %>%
+  count(exp_clone, name = "n") %>%
+  tibble::deframe()
+
+seur_obj$multi_cell_clone <- case_when(
+  is.na(seur_obj$exp_clone)                 ~ NA_character_,
+  clone_size_lookup[seur_obj$exp_clone] > 1 ~ "multi-cell_clone",
+  TRUE                                      ~ "single-cell_clone"
+)
+
+table(seur_obj$experiment, useNA = "ifany")
+table(seur_obj$samples_LARRY, useNA = "ifany")
+table(seur_obj$multi_cell_clone, useNA = "ifany")
+```
+
+## One-time NT filtering and annotation transfer (run once then skip and reload the full rds)
+```{r filter-transfer-save}
+# Remove non-NT cell types, transfer annotation from full RDS, remove partially-retained clusters, save filtered object
+# ── 1. Remove non-NT cell types ──────────────────────────────────────────────
+table(seur_obj$germ.layers, useNA = "ifany")   # inspect first
+
+to_remove  <- c("brain", "brain neuron", "optic cup", "hindbrain", "tailbud", "preneural")
+cells_keep <- colnames(seur_obj)[!seur_obj$germ.layers %in% to_remove]
+seur_obj   <- subset(seur_obj, cells = cells_keep)
+
+cat("Cells remaining:", ncol(seur_obj), "\n")
+
+
+# ── 2. Transfer annotation column(s) from the full RDS ───────────────────────
+seur_full <- readRDS("/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/injHH7-collHH18_LARRY/data/LARRY_integrated_switched_somites_07-09-2025.rds")
+
+# check what annotation columns are available
+colnames(seur_full@meta.data)
+
+cell_type_cols <- grep("^cell.type", colnames(seur_full@meta.data), value = TRUE)
+
+for (col in cell_type_cols) {
+  cat("\n===", col, "===\n")
+  print(sort(unique(seur_full@meta.data[[col]])))
+}
+
+# transfer — works because seur_obj barcodes are a subset of seur_full barcodes
+shared_cells <- intersect(colnames(seur_obj), colnames(seur_full))
+cat("Barcodes matched:", length(shared_cells), "of", ncol(seur_obj), "\n")
+
+# replace "Cell.type" with whichever column(s) you want
+seur_obj$cell.type1 <- seur_full@meta.data[colnames(seur_obj), "cell.type1"]
+
+
+#Check partial removed clusrters and remove them
+orig_sizes    <- table(seur_full@meta.data[["RNA_snn_res.10"]])
+current_sizes <- table(seur_obj@meta.data[["RNA_snn_res.10"]])
+
+retention <- data.frame(
+     cluster      = names(orig_sizes),
+     orig         = as.numeric(orig_sizes),
+     current      = as.numeric(current_sizes[names(orig_sizes)])
+ ) %>%
+     mutate(current       = ifelse(is.na(current), 0, current),
+            pct_retained  = round(100 * current / orig, 1)) %>%
+     arrange(pct_retained)
+
+print(retention)
+
+remove_clusters <- c("26", "29", "30", "46", "75")
+cells_keep <- colnames(seur_obj)[!seur_obj@meta.data[["RNA_snn_res.10"]] %in% remove_clusters]
+seur_obj   <- subset(seur_obj, cells = cells_keep)
+cat("Cells remaining:", ncol(seur_obj), "\n")
+
+rm(seur_full)
+
+# ── 3. Save ───────────────────────────────────────────────────────────────────
+saveRDS(seur_obj, file.path(data, "LARRY_NT_integrated_07-09-2025_filtered_annotated.rds"))
+
+```
+
+---
+
+## Cluster inspection
+
+### Overview at different resolutions
+```{r dimplot-coarse, fig.width=20, fig.height=8}
+# Plot UMAPs at resolutions 20, 25, and 35 to compare cluster granularity
+p1 <- DimPlot(seur_obj, group.by = "RNA_snn_res.20", reduction = "umap", dims = c(1,3),
+              label = TRUE, label.size = 3, pt.size = 0.6) +
+      ggtitle("res 20") + NoLegend()
+
+p2 <- DimPlot(seur_obj, group.by = "RNA_snn_res.25", reduction = "umap", dims = c(1,3),
+              label = TRUE, label.size = 3, pt.size = 0.6) +
+      ggtitle("res 25") + NoLegend()
+
+p3 <- DimPlot(seur_obj, group.by = "RNA_snn_res.35", reduction = "umap", dims = c(1,3),
+              label = TRUE, label.size = 3, pt.size = 0.6) +
+      ggtitle("res 35") + NoLegend()
+
+p2
+
+ggsave(filename = "UMAP-RNA_snn_res25-dims13.png", plot = p2, path = plots,
+       scale = 1, width = 35, height = 26, units = "cm",
+       dpi = 300, bg = "transparent")
+
+```
+
+### Save UMAP DimPlots
+```{r save-umap-dimplot}
+# Generate and save a labelled UMAP coloured by resolution 25 clusters
+library(scCustomize)
+
+n_clusters <- length(unique(seur_obj@meta.data[["RNA_snn_res.25"]]))
+cols <- DiscretePalette_scCustomize(num_colors = n_clusters, palette = "varibow")
+
+p <- DimPlot(seur_obj, group.by = "RNA_snn_res.25", reduction = "umap", dims = c(1, 3),
+             label = TRUE, label.size = 8, label.box = TRUE, repel = TRUE, pt.size = 1.5,
+             cols = cols) +
+     ggtitle("RNA_snn_res.25") +
+     guides(color = guide_legend(ncol = 2, override.aes = list(size = 4)))
+
+ggsave(filename = "UMAP-RNA_snn_res25-dims13.png", plot = p, path = plots,
+       scale = 1, width = 35, height = 26, units = "cm",
+       dpi = 300, bg = "transparent")
+
+```
+
+---
+
+## FeaturePlots — Progenitor markers
+```{r fp-progenitors, fig.width=15, fig.height=12}
+# FeaturePlots for dorsal and ventral progenitor marker genes
+progenitors <- c("SOX2", "SHH", "FOXA2","ARX", "NKX2-2", "NKX6-2", "OLIG2",
+                 "PAX6", "IRX3", "DBX2", "PAX3", "PAX7", "LMX1A", "WNT1",
+                 "SP8", "PRDM12", "ASCL1", "MSX1"
+                 # ,"PDGFRA", "SOX10", "OTX1", "EN2"
+                 )
+
+progenitors <- c("SHH", "FOXA2","ARX",  "LMX1A", "WNT1", "MSX1", "OTX1", "EN2"
+                 )
+
+FeaturePlot(seur_obj,
+            dims = c(2, 3),
+            features = intersect(progenitors, rownames(seur_obj)),
+            reduction = "umap", ncol = 2,
+            min.cutoff = "q10", max.cutoff = "q95", order = TRUE)
+```
+
+## FeaturePlots — Neuron markers
+```{r fp-neurons, fig.width=15, fig.height=20}
+# FeaturePlots for interneuron and motor neuron marker genes
+neurons <- c("TUBB3", "ISL1", "ISL2", "LHX3", "MNX1", "FOXP1",
+             "EN1", "EVX1", "GATA2", "GATA3", "VSX2", "LMX1B",
+             "LHX1", "LHX5", "PAX2", "TLX3", "LBX1", "BARHL2",
+             "SLC17A6", "SLC32A1", "GAD1", "SLC6A5",
+             "ONECUT1", "ONECUT2", "NFIA", "NFIB", "ZFHX3")
+
+FeaturePlot(seur_obj, features = intersect(neurons, rownames(seur_obj)),
+            reduction = "umap", ncol = 5,
+            min.cutoff = "q10", max.cutoff = "q99", order = TRUE)
+```
+
+## FeaturePlots — save individually
+```{r fp-save-loop}
+# Loop over a curated marker list and save individual FeaturePlot PNGs to the plots directory
+# Change this list to whatever you want to plot
+markers_to_save <- c(
+  "SOX2", "LMX1A", "MSX1", "WNT1",  "PAX3",
+  "OLIG3",  "PAX7", "IRX3","PAX6",
+  "GSX2", "ASCL1", "GBX1", "PTF1A", "DBX2",
+  "SP8", "PRDM12", "FOXN4", "NKX6-2", "OLIG2", "NKX2-2",  "NKX2-8", "FOXA2",
+  "ARX", "SHH", "FERD3L",
+
+  "POU4F1", "LHX2", "LHX9", "BARHL1",
+  "LHX1", "LHX5", "ISL1", "TLX3", "LBX1",
+  "PAX2", "GBX1", "LMX1B",
+  "DMRT3", "WT1", "IRX1", "IRX2", "EVX1",  "EN1", "LHX3",
+  "SOX14", "SOX21","VSX2", "SHOX2",  "TAL1", "GATA2", "GATA3",
+   "MNX1",  "ISL2", "SLC10A4", "SIM1")
+
+
+
+for (gene in markers_to_save) {
+  tryCatch({
+    p <- FeaturePlot(seur_obj,
+                     reduction = "umap",
+                     dims = c(2, 3),
+                     features = gene,
+                     pt.size = 0.7,
+                     min.cutoff = "q10", max.cutoff = "q95",
+                     order = TRUE) +
+         scale_x_discrete(breaks = NULL) +
+         scale_y_discrete(breaks = NULL) +
+         labs(title = gene)
+    ggsave(filename = paste0(gene, "_Featureplot-dims2-3.png"), plot = p, path = plots,
+           scale = 1, width = 17, height = 16, units = "cm",
+           dpi = 300, bg = "transparent")
+  }, error = function(e) message(paste("Skipping", gene, ":", e$message)))
+}
+cat("Done saving featureplots.\n")
+```
+
+## Check clusters removed by subsetting
+```{r check-missing-clusters}
+# Print cluster IDs that are absent from the current object after subsetting
+all_levels <- levels(seur_obj@meta.data[["RNA_snn_res.10"]])
+present    <- as.character(unique(seur_obj@meta.data[["RNA_snn_res.10"]]))
+missing    <- setdiff(all_levels, present)
+cat("Missing clusters:", paste(sort(as.numeric(missing)), collapse = ", "), "\n")
+
+```
+
+## DotPlot for cluster inspection
+```{r dotplot-inspect, fig.width=18, fig.height=14}
+# DotPlot of curated marker genes across all clusters at the chosen resolution
+# Change resolution column here once you've picked one
+chosen_res <- "RNA_snn_res.10"
+Idents(seur_obj) <- chosen_res
+
+genes_dotplot <- c(
+  "SOX2", "LMX1A", "MSX1", "MSX2", "WNT1",  "PAX3",
+  "OLIG3",  "PAX7", "IRX3","PAX6",
+  "GSX2", "ASCL1", "GBX1", "GBX2", "PTF1A", "DBX2",
+  "SP8", "PRDM12", "FOXN4", "NKX6-2", "OLIG2", "NKX2-2",  "NKX2-8", "FOXA2",
+  "ARX", "SHH", "FERD3L",
+
+  "POU4F1", "LHX2", "LHX9", "BARHL1",
+  "LHX1", "LHX5", "ISL1", "TLX3", "LBX1",
+  "PAX2", "GBX1", "LMX1B",
+  "DMRT3", "WT1", "IRX1", "IRX2", "EVX1",  "EN1", "LHX3",
+  "SOX14", "SOX21","VSX2", "SHOX2",  "TAL1", "GATA2", "GATA3",
+   "MNX1",  "ISL2", "SLC10A4", "SIM1")
+
+DotPlot(seur_obj,
+        features = intersect(genes_dotplot, rownames(seur_obj)),
+        dot.scale = 5) +
+  scale_color_viridis_c(option = "cividis") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "italic"),
+        axis.text.y = element_text(size = 8)) +
+  labs(x = NULL, y = "Cluster", size = "% Expressing", color = "Avg Expr")
+
+
+ggsave(filename = "Dotplot-res10.png", plot = last_plot(), path = plots,
+       scale = 1, width = 35, height = 22, units = "cm",
+       dpi = 300, bg = "transparent")
+
+```
+
+## Check specific clusters on UMAP
+```{r highlight-clusters}
+# Highlight selected clusters on UMAP to inspect their spatial distribution
+clusters_to_color <- c("14", "27", "31", "39", "40", "81")   # replace with your clusters
+
+cells_list <- lapply(clusters_to_color, function(cl) {
+  colnames(seur_obj)[seur_obj@meta.data[["RNA_snn_res.10"]] == cl]
+})
+names(cells_list) <- clusters_to_color
+
+DimPlot(seur_obj, reduction = "umap", dims = c(2, 3),
+        cells.highlight = cells_list,
+        cols.highlight = DiscretePalette_scCustomize(num_colors = length(clusters_to_color), palette = "varibow"),
+        cols = "lightgrey",
+        pt.size = 1.5,
+        sizes.highlight = 2) +
+  ggtitle("Highlighted clusters")
+
+
+ggsave(filename = "UMAP-clusters14-27-31-39-40-81-dim23.png", plot = last_plot(), path = plots,
+       scale = 1, width = 35, height = 26, units = "cm",
+       dpi = 300, bg = "transparent")
+
+```
+
+## Annotation
+```{r assign-annotation}
+# Apply cluster-to-cell-type lookup table and assign cell_type_fine and cell_type_coarse columns
+# ── Annotation lookup ─────────────────────────────────────────────────────────
+annotation <- tibble::tribble(
+  ~cluster, ~cell_type_fine,  ~cell_type_coarse,
+  "0",      "dp6/dp5",        "dp6",
+  "2",      "p0",             "p0",
+  "4",      "pMN/p3",         "pMN",
+  "5",      "p2/p1",          "p0/p1",
+  "7",      "p0",             "p0/p1",
+  "8",      "p1",             "p0/p1",
+  "10",     "pMN/p2",         "pMN/p2",
+  "11",     "pMN/p2",         "pMN/p2",
+  "12",     "p0",             "p0/p1",
+  "13",     "dp1",            "dp1/2",
+  "14",     "dp4/5",          "dp3/5",
+  "17",     "dp6",            "dp6",
+  "18",     "p1/p2",          "p0/p1",
+  "19",     "dp1",            "dp1/2",
+  "20",     "pMN",            "pMN/p2",
+  "21",     "dp1",            "dp1/2",
+  "25",     "p2",             "pMN/p2",
+  "27",     "dp3/4",          "dp3/5",
+  "31",     "dp3/4",          "dp3/5",
+  "32",     "V0/V1",          "p0/p1",
+  "33",     "p1",             "p0/p1",
+  "34",     "pMN",            "pMN/p2",
+  "35",     "dp4/5",          "dp3/5",
+  "36",     "pMN",            "pMN/p2",
+  "38",     "MN",             "pMN/p2",
+  "39",     "dp3",            "dp3/5",
+  "40",     "dp3/dp4",        "dp3/5",
+  "41",     "p2",             "pMN/p2",
+  "42",     "p0",             "p0/p1",
+  "43",     "MN",             "pMN/p2",
+  "44",     "p0/p1",          "p0/p1",
+  "45",     "dp3/4",          "dp3/5",
+  "49",     "MN",             "pMN/p2",
+  "51",     "p0/dp6",         "p0/p1",
+  "53",     "dp4/5",          "dp3/5",
+  "54",     "p0/p1",          "p0/p1",
+  "55",     "dI4/6",          "dp3/5",
+  "57",     "dI5",            "dp3/5",
+  "59",     "dp6",            "dp6",
+  "60",     "V3",             "p3",
+  "62",     "dp1",            "dp1/2",
+  "63",     "dp6",            "dp6",
+  "64",     "p0",             "p0/p1",
+  "65",     "RP",             "RP",
+  "66",     "p0",             "p0/p1",
+  "67",     "dp2",            "dp1/2",
+  "69",     "FP",             "FP",
+  "70",     "p1",             "p0/p1",
+  "71",     "p3",             "p3",
+  "72",     "p1",             "p0/p1",
+  "73",     "dp5",            "dp3/5",
+  "74",     "p0/p1",          "p0/p1",
+  "76",     "dI1",            "dp1/2",
+  "78",     "Unclear",        "Unclear",
+  "79",     "V2",             "pMN/p2",
+  "80",     "V3",             "p3",
+  "81",     "dp4/5",          "dp3/5",
+  "82",     "MN",             "pMN/p2",
+  "85",     "p0",             "p0/p1",
+  "87",     "p0",             "p0/p1",
+  "88",     "Unclear",        "Unclear"
+)
+
+lookup_fine   <- setNames(annotation$cell_type_fine,   annotation$cluster)
+lookup_coarse <- setNames(annotation$cell_type_coarse, annotation$cluster)
+
+res10 <- as.character(seur_obj@meta.data[["RNA_snn_res.10"]])
+res25 <- as.character(seur_obj@meta.data[["RNA_snn_res.25"]])
+
+# ── Assign annotations ────────────────────────────────────────────────────────
+seur_obj$cell_type_fine <- unname(case_when(
+  res10 == "22" & res25 %in% c("97", "142") ~ "dI2",
+  res10 == "22" & res25 == "120"             ~ "dp1",
+  res10 == "23" & res25 == "45"              ~ "MN",
+  res10 == "23" & res25 %in% c("102", "152") ~ "Unclear",
+  TRUE ~ lookup_fine[res10]
+))
+
+seur_obj$cell_type_coarse <- unname(case_when(
+  res10 == "22" & res25 %in% c("97", "142") ~ "dp1/2",
+  res10 == "22" & res25 == "120"             ~ "dp1/2",
+  res10 == "23" & res25 == "45"              ~ "pMN/p2",
+  res10 == "23" & res25 %in% c("102", "152") ~ "Unclear",
+  TRUE ~ lookup_coarse[res10]
+))
+
+table(seur_obj$cell_type_fine,   useNA = "ifany")
+table(seur_obj$cell_type_coarse, useNA = "ifany")
+
+seur_obj$cell_type_coarse[seur_obj$cell_type_coarse == "pMN"] <- "pMN/p2"
+seur_obj$cell_type_coarse[seur_obj$cell_type_coarse == "p0"] <- "p0/p1"
+table(seur_obj$cell_type_coarse)
+
+
+seur_obj$cell_type_fine[seur_obj$cell_type_fine == "dp3/dp4"] <- "dp3/4"
+seur_obj$cell_type_fine[seur_obj$cell_type_fine == "p2/p1"] <- "p1/p2"
+table(seur_obj$cell_type_fine,   useNA = "ifany")
+
+```
+
+## Collapse cell type labels
+```{r collapse-celltypes}
+# Recode cell_type_fine into a simplified cell_type_collapsed column for downstream analyses
+seur_obj$cell_type_collapsed <- dplyr::recode(
+  seur_obj$cell_type_fine,
+  "dp3/4"   = "dp4/5",
+  "dp5"     = "dp4/5",
+  "pMN/p2"  = "pMN",
+  "pMN/p3"  = "pMN",
+  "p0/p1"   = "p0",
+  "dp6/dp5" = "dp6",
+  "p0/dp6"  = "dp6",
+  "p1/p2"   = "p2",
+  "dI4/6"   = "dI4/dI5",
+  "dI5"     = "dI4/dI5"
+)
+
+table(seur_obj$cell_type_collapsed)
+```
+
+## Save annotated RDS
+```{r save-annotated-rds}
+# Save the fully annotated Seurat object back to disk
+saveRDS(seur_obj, file.path(data, "LARRY_NT_integrated_07-09-2025_annotated.rds"))
+cat("Saved.\n")
+```
+
+---
+
+### Check annotation on UMAP
+```{r check-umap-clusters}
+# Plot UMAP coloured by resolution 25 clusters to verify annotation coverage
+library(scCustomize)
+
+n_clusters <- length(unique(seur_obj@meta.data[["RNA_snn_res.25"]]))
+cols <- DiscretePalette_scCustomize(num_colors = n_clusters, palette = "varibow")
+
+p <- DimPlot(seur_obj, group.by = "RNA_snn_res.25", reduction = "umap", dims = c(1, 3),
+             label = TRUE, label.size = 8, label.box = TRUE, repel = TRUE, pt.size = 1.5,
+             cols = cols) +
+     ggtitle("RNA_snn_res.25") +
+     guides(color = guide_legend(ncol = 2, override.aes = list(size = 4)))
+
+ggsave(filename = "UMAP-RNA_snn_res25-dims13.png", plot = p, path = plots,
+       scale = 1, width = 35, height = 26, units = "cm",
+       dpi = 300, bg = "transparent")
+
+```
+
+```{r check-annotation, fig.width=10, fig.height=8}
+# Plot UMAP coloured by collapsed cell type labels to confirm annotation spread
+n_clusters <- length(unique(seur_obj@meta.data[["cell_type_collapsed"]]))
+cols <- DiscretePalette_scCustomize(num_colors = n_clusters, palette = "varibow")
+
+DimPlot(seur_obj, group.by = "cell_type_collapsed", reduction = "umap", dims = c(1, 3),
+             label = TRUE, label.size = 8, label.box = TRUE, repel = TRUE, pt.size = 1.5,
+             cols = cols) +
+     ggtitle("cell_type_collapsed") +
+     guides(color = guide_legend(ncol = 2, override.aes = list(size = 4)))
+
+
+```
+
+## Export annotated metadata CSV
+```{r export-metadata-csv}
+# Write flat metadata table with clone, somites, and all annotation columns to CSV
+seur_obj@meta.data %>%
+  tibble::rownames_to_column("index") %>%
+  select(index, clone = exp_clone, somites, cell_type_fine, cell_type_coarse, cell_type_collapsed) %>%
+  write.csv(file.path(data, "LARRY_NT_integrated_07-09-2025_annotated_metadata.csv"), row.names = FALSE)
+```
+
+---
+
+## Clone QC, composition & domain diversity
+
+### Clone QC — Table 1
+```{r clone-qc-table}
+# Compute per-sample and overall clone QC stats; save as Table1_clone_QC_injHH7-collHH18.xlsx
+library(dplyr)
+library(tidyr)
+library(readr)
+
+if (!requireNamespace("openxlsx", quietly = TRUE)) install.packages("openxlsx")
+library(openxlsx)
+
+data  <- "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/injHH7-collHH18_LARRY/data/"
+plots <- "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/injHH7-collHH18_LARRY/plots/"
+
+# ── Per-sample clone stats ────────────────────────────────────────────────────
+clone_sizes_raw <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(exp_clone)) %>%
+  count(exp_clone, sample, name = "clone_size")
+
+detection_per_sample <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY") %>%
+  group_by(sample) %>%
+  summarise(
+    total_cells = n(),
+    cells_LARRY_detected    = sum(clone_id_detected == "detected", na.rm = TRUE),
+    pct_detected      = round(100 * cells_LARRY_detected / total_cells, 1),
+    .groups = "drop"
+  )
+
+clones_per_sample <- clone_sizes_raw %>%
+  group_by(sample) %>%
+  summarise(
+    n_clones      = n_distinct(exp_clone),
+    mean_size     = round(mean(clone_size), 2),
+    median_size   = median(clone_size),
+    max_size      = max(clone_size),
+    n_single_cell = sum(clone_size == 1),
+    n_multi_cell  = sum(clone_size > 1),
+    pct_single    = round(100 * sum(clone_size == 1) / n(), 1),
+    pct_multi     = round(100 * sum(clone_size > 1)  / n(), 1),
+    .groups = "drop"
+  ) %>%
+  left_join(detection_per_sample, by = "sample")
+
+# ── Overall row (computed from raw data, not averaged across samples) ─────────
+clone_sizes_all <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(exp_clone)) %>%
+  count(exp_clone, name = "clone_size")
+
+larry_cells_all <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY")
+
+table1_overall <- tibble(
+  sample            = "Overall",
+  n_clones          = nrow(clone_sizes_all),
+  mean_size         = round(mean(clone_sizes_all$clone_size), 2),
+  median_size       = median(clone_sizes_all$clone_size),
+  max_size          = max(clone_sizes_all$clone_size),
+  n_single_cell     = sum(clone_sizes_all$clone_size == 1),
+  n_multi_cell      = sum(clone_sizes_all$clone_size > 1),
+  pct_single        = round(100 * sum(clone_sizes_all$clone_size == 1) / nrow(clone_sizes_all), 1),
+  pct_multi         = round(100 * sum(clone_sizes_all$clone_size > 1)  / nrow(clone_sizes_all), 1),
+  total_cells = nrow(larry_cells_all),
+  cells_LARRY_detected    = sum(larry_cells_all$clone_id_detected == "detected", na.rm = TRUE),
+  pct_detected      = round(100 * sum(larry_cells_all$clone_id_detected == "detected", na.rm = TRUE) /
+                              nrow(larry_cells_all), 1)
+)
+
+table1 <- bind_rows(clones_per_sample, table1_overall)
+print(table1)
+
+wb1 <- createWorkbook()
+addWorksheet(wb1, "summary_per_sample")
+writeData(wb1, "summary_per_sample", table1)
+saveWorkbook(wb1, file.path(data, "Table1_clone_QC_injHH7-collHH18.xlsx"), overwrite = TRUE)
+cat("Table 1 saved!\n")
+```
+
+### Clone size histogram
+```{r clone-size-histogram}
+# Plot histogram of clone sizes with median and mean annotations; save as PDF
+clone_sizes_hist <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(exp_clone)) %>%
+  count(exp_clone, name = "clone_size")
+
+annot <- clone_sizes_hist %>%
+  summarise(med = median(clone_size), mean = round(mean(clone_size), 2), n = n())
+
+ggplot(clone_sizes_hist, aes(x = clone_size)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white", alpha = 0.85) +
+  geom_vline(xintercept = annot$med, color = "red", linetype = "dashed", linewidth = 0.8) +
+  annotate("text", x = Inf, y = Inf,
+           label = paste0("n = ", annot$n, "\nmedian = ", annot$med, "\nmean = ", annot$mean),
+           hjust = 1.1, vjust = 1.2, size = 3.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6)) +
+  theme_minimal(base_size = 13) +
+  labs(title = "Clone size distribution (all LARRY clones — injHH7-collHH18 NT)",
+       x = "Clone size (number of cells)", y = "Number of clones")
+
+ggsave(filename = "clone_size_histogram.pdf", plot = last_plot(), path = plots,
+       scale = 1, width = 20, height = 15, units = "cm", dpi = 300, bg = "transparent")
+```
+
+### Clone domain diversity — Table 2
+```{r clone-domain-diversity}
+# Classify multi-cell clones by progenitor domain diversity; save as Table2 Excel
+# ── Cell type categories (cell_type_collapsed) ────────────────────────────────
+# Progenitor domains: all p-domain identities
+# Neurons: V0/V1 included as neuronal (V0, V1 are spinal interneurons)
+# Unclear excluded from domain counting
+
+progenitor_domains <- c("RP", "FP",
+                        "dp1", "dp2", "dp3", "dp4/5", "dp6",
+                        "p0",  "p1",  "p2",  "pMN",   "p3")
+neurons_hh7_hh18     <- c("MN", "V2", "V3", "V0/V1", "dI1", "dI4/dI5")
+
+# ── Build per-clone domain summary (multicell clones only) ────────────────────
+clone_size_lookup <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(exp_clone)) %>%
+  count(exp_clone, name = "clone_size")
+
+clone_domains <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(exp_clone)) %>%
+  left_join(clone_size_lookup, by = "exp_clone") %>%
+  filter(clone_size > 1) %>%
+  mutate(broad_type = case_when(
+    cell_type_collapsed %in% progenitor_domains ~ "progenitor",
+    cell_type_collapsed %in% neurons_hh7_hh18     ~ "neuron",
+    TRUE                                        ~ "excluded"   # Unclear
+  )) %>%
+  group_by(exp_clone) %>%
+  summarise(
+    prog_domain_list = list(sort(unique(cell_type_collapsed[broad_type == "progenitor"]))),
+    n_prog_domains   = n_distinct(cell_type_collapsed[broad_type == "progenitor"]),
+    contains_neurons = any(broad_type == "neuron"),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    domain_fate = case_when(
+      n_prog_domains == 0 & contains_neurons  ~ "neuron_only",
+      n_prog_domains == 0 & !contains_neurons ~ "excluded_only",
+      n_prog_domains == 1                     ~ "single_domain",
+      n_prog_domains >= 2                     ~ "multi_domain"
+    )
+  )
+
+cat("Total multicell clones:", nrow(clone_domains), "\n")
+
+# ── Domain fate overall ───────────────────────────────────────────────────────
+cat("\n=== Progenitor domain diversity (all multicell clones) ===\n")
+domain_fate_overall <- clone_domains %>%
+  filter(domain_fate != "excluded_only") %>%
+  count(domain_fate) %>%
+  mutate(pct = round(100 * n / sum(n), 1)) %>%
+  arrange(factor(domain_fate, levels = c("single_domain", "multi_domain", "neuron_only")))
+print(domain_fate_overall)
+
+# ── Multi-domain combos ───────────────────────────────────────────────────────
+cat("\n=== Multi-domain combos ===\n")
+multi_domain_combos <- clone_domains %>%
+  filter(domain_fate == "multi_domain") %>%
+  mutate(combo = sapply(prog_domain_list, function(x) paste(x, collapse = " + "))) %>%
+  count(combo) %>%
+  arrange(desc(n))
+print(multi_domain_combos, n = 30)
+
+# ── Save as multi-sheet Excel ─────────────────────────────────────────────────
+wb2 <- createWorkbook()
+addWorksheet(wb2, "domain_fate_overall")
+writeData(wb2, "domain_fate_overall", domain_fate_overall)
+addWorksheet(wb2, "multi_domain_combos")
+writeData(wb2, "multi_domain_combos", multi_domain_combos)
+saveWorkbook(wb2, file.path(data, "Table2_clone_domain_diversity_injHH7-collHH18.xlsx"), overwrite = TRUE)
+cat("Table 2 saved!\n")
+```
+
+### Dropout fractions per sample
+```{r dropout-fractions}
+# Compute LARRY detection rates per cell type (per sample and overall); save as CSVs
+celltype_order_hh7_hh18 <- c(
+  "RP", "dp1", "dp2", "dp3", "dp4/5", "dp6",
+  "p0", "p1", "p2", "pMN", "p3", "FP",
+  "V0/V1", "dI1", "dI4/dI5", "V2", "V3", "MN",
+  "Unclear"
+)
+
+# ── Per sample ────────────────────────────────────────────────────────────────
+dropout_per_sample <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(cell_type_collapsed)) %>%
+  mutate(cell_type_collapsed = factor(cell_type_collapsed, levels = celltype_order_hh7_hh18)) %>%
+  filter(!is.na(cell_type_collapsed)) %>%           # drop values not in celltype_order_hh7_hh18
+  group_by(sample, cell_type_collapsed, .drop = FALSE) %>%
+  summarise(
+    detected     = sum(clone_id_detected == "detected",     na.rm = TRUE),
+    not_detected = sum(clone_id_detected == "not_detected", na.rm = TRUE),
+    total_cells  = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(pct_detected = round(100 * detected / total_cells, 1)) %>%
+  arrange(sample, cell_type_collapsed)
+
+# ── Overall (across all LARRY samples) ────────────────────────────────────────
+dropout_overall <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(cell_type_collapsed)) %>%
+  mutate(cell_type_collapsed = factor(cell_type_collapsed, levels = celltype_order_hh7_hh18)) %>%
+  filter(!is.na(cell_type_collapsed)) %>%           # drop values not in celltype_order_hh7_hh18
+  group_by(cell_type_collapsed, .drop = FALSE) %>%
+  summarise(
+    detected     = sum(clone_id_detected == "detected",     na.rm = TRUE),
+    not_detected = sum(clone_id_detected == "not_detected", na.rm = TRUE),
+    total_cells  = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(pct_detected = round(100 * detected / total_cells, 1)) %>%
+  arrange(cell_type_collapsed)
+
+print(dropout_per_sample, n = Inf)
+print(dropout_overall)
+
+write.csv(dropout_per_sample, file.path(data, "LARRY_detection_summary_per_sample_injHH7-collHH18.csv"), row.names = FALSE)
+write.csv(dropout_overall,    file.path(data, "LARRY_detection_summary_overall_injHH7-collHH18.csv"),    row.names = FALSE)
+cat("Dropout fractions saved!\n")
+```
+
+### LARRY detection barplot
+```{r detection-barplot-hh7-hh18}
+# Stacked detected / not_detected, one bar for the whole dataset
+detection_plot_df <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY") %>%
+  mutate(clone_id_detected = ifelse(!is.na(exp_clone), "detected", "not_detected")) %>%
+  group_by(clone_id_detected) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  mutate(
+    percent_cells     = round(100 * n / sum(n), 1),
+    dataset           = "HH7-9 → HH18",
+    clone_id_detected = factor(clone_id_detected, levels = c("not_detected", "detected"))
+  ) %>%
+  arrange(clone_id_detected) %>%                      # not_detected first → bottom
+  mutate(y_label = cumsum(percent_cells) - percent_cells / 2)
+
+ggplot(detection_plot_df, aes(x = dataset, y = percent_cells, fill = clone_id_detected)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(
+    aes(label = round(percent_cells, digits = 1), y = y_label),
+    colour = "black", size = 8, hjust = 0.5, vjust = 0.5
+  ) +
+  scale_fill_manual(
+    values = c("not_detected" = "grey90", "detected" = "darkcyan"),
+    labels = c("not_detected" = "Not detected", "detected" = "Detected")
+  ) +
+  labs(title = "LARRY barcode detection") +
+  ylab("% of cells") +
+  theme_classic() +
+  theme(
+    legend.title = element_blank(),
+    axis.title.x = element_blank(),
+    plot.title   = element_text(face = "bold", size = 24, vjust = 0.5, hjust = 0.5),
+    axis.title.y = element_text(face = "bold", size = 18),
+    axis.text    = element_text(size = 14)
+  )
+
+ggsave(filename = "LARRY_detection_barplot.pdf", plot = last_plot(), path = plots,
+       width = 3, height = 12, units = "cm", dpi = 300, bg = "transparent")
+```
+
+---
+
+## Export for Python h5ad reconstruction (run once)
+```{r export-h5ad, eval=FALSE}
+# Produces flat files → copy export_dir to NEMO before running scLiTr notebook:
+#   scp -r <data>/h5ad_export/ boeziog@login.nemo.crick.ac.uk:<nemo_data>/injHH7-collHH18_LARRY/data/h5ad_export/
+
+export_dir <- file.path(data, "h5ad_export")
+dir.create(export_dir, showWarnings = FALSE, recursive = TRUE)
+
+# 1. Sparse count matrix (genes × cells — Python transposes to cells × genes)
+Matrix::writeMM(
+  GetAssayData(seur_obj, assay = "RNA", layer = "counts"),
+  file = file.path(export_dir, "counts.mtx")
+)
+
+# 2. Gene names and barcodes (same order as count matrix)
+writeLines(rownames(seur_obj), file.path(export_dir, "genes.txt"))
+writeLines(colnames(seur_obj), file.path(export_dir, "barcodes.txt"))
+
+# 3. Metadata
+seur_obj@meta.data %>%
+  tibble::rownames_to_column("index") %>%
+  select(index, clone = exp_clone, somites,
+         cell_type_fine, cell_type_coarse, cell_type_collapsed) %>%
+  write.csv(file.path(export_dir, "metadata.csv"), row.names = FALSE)
+
+# 4. scVI embedding (cells × 30)
+as.data.frame(seur_obj@reductions$scvi@cell.embeddings) %>%
+  tibble::rownames_to_column("index") %>%
+  write.csv(file.path(export_dir, "X_scvi.csv"), row.names = FALSE)
+
+# 5. UMAP embedding (cells × 3)
+as.data.frame(seur_obj@reductions$umap@cell.embeddings) %>%
+  tibble::rownames_to_column("index") %>%
+  write.csv(file.path(export_dir, "X_umap.csv"), row.names = FALSE)
+
+cat("Export complete. Files in:", export_dir, "\n")
+cat("Copy to NEMO before running scLiTr notebook.\n")
+```
