@@ -5,7 +5,7 @@ This repository contains the code, data references, and notebooks used in the an
 
 Hierarchical lineage architecture of human and avian spinal cord revealed by single-cell genomic barcoding
 
-Giulia L. M. Boezio1,*, Jasper R. L. Depotter1, Arthur Radley1, Thomas J. R. Frith1, Dimitris Volteras, Ashley Libby, Stephanie Strohbuecker1, Ana C. Cunha1, Michael Howell1, James Briscoe1,*
+Giulia L. M. Boezio, Jasper R. L. Depotter, Arthur Radley, Thomas J. R. Frith, Dimitris Volteras, Ashley Libby, Stephanie Strohbuecker, Ana C. Cunha, Michael Howell, James Briscoe
 
 https://www.biorxiv.org/content/10.1101/2025.10.24.684328v1.full
 
