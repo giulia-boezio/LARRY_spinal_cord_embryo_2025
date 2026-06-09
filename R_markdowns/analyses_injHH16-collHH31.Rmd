@@ -1,0 +1,431 @@
+---
+title: "HH16_HH31_new_analyses"
+output: html_document
+date: "2026-05-11"
+---
+
+This notebook covers QC metrics, clone composition, and neuronal fate analyses for the injHH16-collHH31 chicken spinal cord LARRY dataset (5 samples: BOE5073A25–A29; injection at HH16, collection at HH31).
+
+**Data required:**
+
+- `preprocessing_larry_chicken_NT_injHH16_collHH31.rds` — preprocessed, annotated Seurat object (from the preprocessing pipeline)
+
+**Outputs:**
+
+- `Table1_clone_QC_HH16HH31.xlsx` — per-sample clone QC summary table
+- `Table2_clone_composition_neuronal_fate_HH16HH31.xlsx` — clone class and neuronal fate tables (5 sheets)
+- `LARRY_detection_summary_per_sample_HH16HH31.csv` — LARRY detection rates per cell type per sample (**required input for Figure1-S1-S2_new.Rmd**)
+- `LARRY_detection_summary_overall_HH16HH31.csv` — LARRY detection rates per cell type overall
+- `clone_size_histogram.pdf` — histogram of clone size distribution
+- `LARRY_detection_barplot.pdf` — stacked barplot of LARRY barcode detection rate
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+```{r init}
+# Load all required packages
+library(dplyr)
+library(Seurat)
+library(readr)
+library(tidyverse)
+library(scCustomize)
+library(ggplot2)
+library(ggrepel)
+
+```
+
+## Parameters
+
+```{r parameters}
+# Define experiment identifiers and derived file prefix
+tissue           <- "NT"
+injection_stage  <- "HH16"
+collection_stage <- "HH31"
+
+experiment_name  <- paste0(tissue, "_inj", injection_stage, "_coll", collection_stage)
+file_prefix      <- paste0("preprocessing_larry_chicken_", experiment_name)
+
+cat("Experiment:", experiment_name, "\n")
+```
+
+## Paths to upload Seurat
+
+```{r paths}
+# Define input and output directories; create seurat output dir if absent
+data_path            <- "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/data/"
+anndata_seurat_path  <- file.path(data_path, "anndata_seurat")
+seurat_path          <- file.path(data_path, "seurat")
+
+dir.create(seurat_path, showWarnings = FALSE, recursive = TRUE)
+```
+
+## Output paths
+```{r output-paths}
+# Define plot and data output directories
+plots = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/HH16_HH31_new_May_2026"
+
+data = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/HH16_HH31_new_May_2026"
+
+```
+
+## Read and prepare Seurat object
+```{r load-seurat}
+# Load RDS, standardise metadata column names, add experiment/LARRY/clone metadata columns
+seur_obj <- read_rds(file.path(seurat_path, paste0(file_prefix, ".rds")))
+
+# Rename columns to match standard naming
+colnames(seur_obj@meta.data)[colnames(seur_obj@meta.data) == "cell_type_final"] <- "Cell.type"
+colnames(seur_obj@meta.data)[colnames(seur_obj@meta.data) == "clone"]           <- "exp_clone"
+
+# Column 1: "experiment" — all samples are HH31 collection
+seur_obj@meta.data$experiment <- case_when(
+  seur_obj@meta.data$sample %in% c("BOE5073A25", "BOE5073A26", "BOE5073A27",
+                                   "BOE5073A28", "BOE5073A29") ~ "HH31",
+  TRUE ~ NA_character_
+)
+
+# Column 2: "samples_LARRY"
+seur_obj@meta.data$samples_LARRY <- case_when(
+  seur_obj@meta.data$sample %in% c("BOE5073A26", "BOE5073A27",
+                                   "BOE5073A28", "BOE5073A29") ~ "LARRY",
+  seur_obj@meta.data$sample == "BOE5073A25"                    ~ "control",
+  TRUE ~ NA_character_
+)
+
+# Column 3: "clone_id_detected"
+seur_obj@meta.data <- seur_obj@meta.data %>%
+  mutate(clone_id_detected = case_when(
+    experiment == "HH31" & !is.na(exp_clone) ~ "detected",
+    experiment == "HH31" &  is.na(exp_clone) ~ "not_detected",
+    TRUE ~ NA_character_
+  ))
+
+# Standardise Cell.type — replace NA with Unknown
+seur_obj@meta.data$Cell.type <- seur_obj@meta.data$Cell.type %>%
+  replace_na("Unknown")
+
+# Clone size
+clone_sizes <- seur_obj@meta.data %>%
+  filter(!is.na(exp_clone)) %>%
+  count(exp_clone, name = "clone_size")
+
+meta_with_clone_status <- seur_obj@meta.data %>%
+  left_join(clone_sizes, by = "exp_clone") %>%
+  mutate(multi_cell_clone = case_when(
+    clone_size > 1  ~ "multi-cell_clone",
+    clone_size == 1 ~ "single-cell_clone",
+    TRUE            ~ NA_character_
+  ))
+
+rownames(meta_with_clone_status) <- rownames(seur_obj@meta.data)
+
+seur_obj <- AddMetaData(seur_obj,
+                        metadata = meta_with_clone_status$multi_cell_clone,
+                        col.name = "multi_cell_clone")
+
+```
+
+## Clone QC, composition & neuronal fate
+
+### Table 1 - Clone QC summary
+```{r clone-qc-table1-hh1631}
+# Compute per-sample and overall clone QC stats; save as Table1_clone_QC_HH16HH31.xlsx
+if (!requireNamespace("openxlsx", quietly = TRUE)) install.packages("openxlsx")
+library(openxlsx)
+
+celltype_order_hh1631 <- c("RP", "dp1", "dp2", "dpL", "dp6", "p0", "p1", "p2", "pMN", "p3", "FP",
+                            "OPCs", "dI1", "dI2", "dI3", "dI4", "dI5", "immature_V0_dI6", "dI6",
+                            "V0", "V1", "V2a", "V2b", "MN", "V3", "unclear", "Unknown")
+
+# All detected clones (single + multi) per sample
+clone_sizes_all <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(exp_clone)) %>%
+  group_by(sample, exp_clone) %>%
+  summarise(clone_size = n(), .groups = "drop")
+
+# Detection rate per sample
+detection_samp <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY") %>%
+  group_by(sample) %>%
+  summarise(
+    total_cells          = n(),
+    cells_LARRY_detected = sum(!is.na(exp_clone)),
+    pct_detected         = round(100 * cells_LARRY_detected / total_cells, 1),
+    .groups = "drop"
+  )
+
+# Per-sample clone stats
+stats_per_sample <- clone_sizes_all %>%
+  group_by(sample) %>%
+  summarise(
+    n_clones      = n_distinct(exp_clone),
+    mean_size     = round(mean(clone_size), 1),
+    median_size   = median(clone_size),
+    max_size      = max(clone_size),
+    n_single_cell = sum(clone_size == 1),
+    n_multi_cell  = sum(clone_size > 1),
+    pct_single    = round(100 * n_single_cell / n_clones, 1),
+    pct_multi     = round(100 * n_multi_cell  / n_clones, 1),
+    .groups = "drop"
+  ) %>%
+  left_join(detection_samp, by = "sample")
+
+# Overall row
+overall_clone_stats <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(exp_clone)) %>%
+  group_by(exp_clone) %>%
+  summarise(clone_size = n(), .groups = "drop") %>%
+  summarise(
+    n_clones      = n(),
+    mean_size     = round(mean(clone_size), 1),
+    median_size   = median(clone_size),
+    max_size      = max(clone_size),
+    n_single_cell = sum(clone_size == 1),
+    n_multi_cell  = sum(clone_size > 1),
+    pct_single    = round(100 * n_single_cell / n_clones, 1),
+    pct_multi     = round(100 * n_multi_cell  / n_clones, 1)
+  )
+
+overall_detect <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY") %>%
+  summarise(
+    total_cells          = n(),
+    cells_LARRY_detected = sum(!is.na(exp_clone)),
+    pct_detected         = round(100 * cells_LARRY_detected / total_cells, 1)
+  )
+
+overall_row <- bind_cols(tibble(sample = "Overall"), overall_clone_stats, overall_detect)
+summary_per_sample_full <- bind_rows(stats_per_sample, overall_row)
+
+wb1 <- createWorkbook()
+addWorksheet(wb1, "summary_per_sample")
+writeData(wb1, "summary_per_sample", summary_per_sample_full)
+saveWorkbook(wb1, file.path(data, "Table1_clone_QC_HH16HH31.xlsx"), overwrite = TRUE)
+cat("Table1_clone_QC_HH16HH31.xlsx saved\n")
+```
+
+### Clone size histogram
+```{r clone-size-histogram-hh1631}
+# Plot histogram of clone sizes with median and mean annotations; save as PDF
+clone_sizes_hist <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(exp_clone)) %>%
+  count(exp_clone, name = "clone_size")
+
+annot <- clone_sizes_hist %>%
+  summarise(med = median(clone_size), mean = round(mean(clone_size), 2), n = n())
+
+ggplot(clone_sizes_hist, aes(x = clone_size)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white", alpha = 0.85) +
+  geom_vline(xintercept = annot$med, color = "red", linetype = "dashed", linewidth = 0.8) +
+  annotate("text", x = Inf, y = Inf,
+           label = paste0("n = ", annot$n, "\nmedian = ", annot$med, "\nmean = ", annot$mean),
+           hjust = 1.1, vjust = 1.2, size = 3.5) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 6)) +
+  theme_minimal(base_size = 13) +
+  labs(title = "Clone size distribution (all LARRY clones — HH31)",
+       x = "Clone size (number of cells)", y = "Number of clones")
+
+ggsave(filename = "clone_size_histogram.pdf", plot = last_plot(), path = plots,
+       width = 18, height = 12, units = "cm", dpi = 300, bg = "transparent")
+```
+
+### Table 2 - Clone composition & neuronal fate
+```{r clone-table2-hh1631}
+# Classify multi-cell clones by lineage composition and neuronal fate; save as Table2 Excel
+library(openxlsx)
+
+progenitors_hh1631 <- c("RP", "dp1", "dp2", "dpL", "dp6", "p0", "p1", "p2", "pMN", "p3", "FP")
+neurons_hh1631     <- c("dI1", "dI2", "dI3", "dI4", "dI5", "dI6", "immature_V0_dI6",
+                         "V0", "V1", "V2a", "V2b", "MN", "V3")
+glia_hh1631        <- c("OPCs")
+# unclear + Unknown → excluded_only
+
+# Multi-cell clones only
+clone_cells_multi <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", multi_cell_clone == "multi-cell_clone") %>%
+  select(exp_clone, Cell.type)
+
+# Clone class per clone
+clone_class_df <- clone_cells_multi %>%
+  group_by(exp_clone) %>%
+  summarise(
+    has_prog = any(Cell.type %in% progenitors_hh1631),
+    has_neur = any(Cell.type %in% neurons_hh1631),
+    has_glia = any(Cell.type %in% glia_hh1631),
+    .groups = "drop"
+  ) %>%
+  mutate(clone_class = case_when(
+    has_prog & !has_neur & !has_glia ~ "progenitor_only",
+    !has_prog & has_neur & !has_glia ~ "neuron_only",
+    !has_prog & !has_neur & has_glia ~ "glia_only",
+    has_prog & has_neur & !has_glia  ~ "progenitor_neuron",
+    has_prog & !has_neur & has_glia  ~ "glia_progenitor",
+    !has_prog & has_neur & has_glia  ~ "glia_neuron",
+    has_prog & has_neur & has_glia   ~ "mixed_all",
+    TRUE                             ~ "excluded_only"
+  ))
+
+class_levels <- c("progenitor_only", "neuron_only", "glia_only",
+                  "progenitor_neuron", "glia_progenitor", "glia_neuron",
+                  "mixed_all", "excluded_only")
+
+clone_class_overall <- clone_class_df %>%
+  count(clone_class) %>%
+  mutate(pct = round(100 * n / sum(n), 1)) %>%
+  arrange(factor(clone_class, levels = class_levels))
+
+# Neuronal fate — V2 collapse (V2a + V2b → V2, same as Fig 1 chicken)
+neuron_types_v2 <- c("dI1", "dI2", "dI3", "dI4", "dI5", "dI6", "immature_V0_dI6",
+                      "V0", "V1", "V2", "MN", "V3")
+
+clone_fate_v2 <- clone_cells_multi %>%
+  mutate(Cell.type_v2 = case_when(
+    Cell.type %in% c("V2a", "V2b") ~ "V2",
+    TRUE ~ Cell.type
+  )) %>%
+  filter(Cell.type_v2 %in% neuron_types_v2) %>%
+  group_by(exp_clone) %>%
+  summarise(
+    neuron_types   = list(sort(unique(Cell.type_v2))),
+    n_neuron_types = n_distinct(Cell.type_v2),
+    .groups = "drop"
+  ) %>%
+  mutate(neuron_fate = case_when(
+    n_neuron_types == 1 ~ "single_neuronal_fate",
+    n_neuron_types > 1  ~ "multi_neuronal_fate"
+  ))
+
+# fate_overall: neuronal clones only as denominator
+fate_overall <- clone_fate_v2 %>%
+  count(neuron_fate) %>%
+  mutate(pct = round(100 * n / sum(n), 1)) %>%
+  arrange(factor(neuron_fate, levels = c("single_neuronal_fate", "multi_neuronal_fate")))
+
+# fate_all_clones: all multicell clones as denominator (reviewer question)
+fate_all_clones_overall <- clone_class_df %>%
+  left_join(clone_fate_v2 %>% select(exp_clone, neuron_fate), by = "exp_clone") %>%
+  mutate(fate_category = case_when(
+    is.na(neuron_fate) ~ "no_neuronal_fate",
+    TRUE               ~ neuron_fate
+  )) %>%
+  count(fate_category) %>%
+  mutate(pct = round(100 * n / sum(n), 1)) %>%
+  arrange(factor(fate_category, levels = c("no_neuronal_fate",
+                                           "single_neuronal_fate",
+                                           "multi_neuronal_fate")))
+
+# fate_by_type: per neuron type, how many clones contain it
+fate_by_type <- clone_cells_multi %>%
+  mutate(Cell.type_v2 = case_when(
+    Cell.type %in% c("V2a", "V2b") ~ "V2",
+    TRUE ~ Cell.type
+  )) %>%
+  filter(Cell.type_v2 %in% neuron_types_v2) %>%
+  group_by(exp_clone, Cell.type_v2) %>%
+  summarise(n_cells = n(), .groups = "drop") %>%
+  group_by(Cell.type_v2) %>%
+  summarise(
+    n_clones_with_type = n_distinct(exp_clone),
+    .groups = "drop"
+  ) %>%
+  mutate(pct_of_neuronal_clones = round(100 * n_clones_with_type / nrow(clone_fate_v2), 1)) %>%
+  arrange(factor(Cell.type_v2, levels = neuron_types_v2))
+
+# Multi-fate combos
+multi_fate_combos <- clone_fate_v2 %>%
+  filter(neuron_fate == "multi_neuronal_fate") %>%
+  mutate(combo = sapply(neuron_types, paste, collapse = "+")) %>%
+  count(combo, sort = TRUE) %>%
+  mutate(pct = round(100 * n / sum(n), 1))
+
+wb2 <- createWorkbook()
+addWorksheet(wb2, "clone_class_overall")
+writeData(wb2, "clone_class_overall", clone_class_overall)
+addWorksheet(wb2, "fate_overall")
+writeData(wb2, "fate_overall", fate_overall)
+addWorksheet(wb2, "fate_all_clones_overall")
+writeData(wb2, "fate_all_clones_overall", fate_all_clones_overall)
+addWorksheet(wb2, "fate_by_type")
+writeData(wb2, "fate_by_type", fate_by_type)
+addWorksheet(wb2, "multi_fate_combos")
+writeData(wb2, "multi_fate_combos", multi_fate_combos)
+saveWorkbook(wb2, file.path(data, "Table2_clone_composition_neuronal_fate_HH16HH31.xlsx"), overwrite = TRUE)
+cat("Table2_clone_composition_neuronal_fate_HH16HH31.xlsx saved\n")
+```
+
+## LARRY detection rate per cell type
+```{r dropout-hh1631}
+# Compute LARRY detection rates per cell type (per sample and overall); save as CSVs
+# Per cell type per sample (double-filter NA pattern)
+dropout_per_sample <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(Cell.type)) %>%
+  mutate(Cell.type = factor(Cell.type, levels = celltype_order_hh1631)) %>%
+  filter(!is.na(Cell.type)) %>%
+  group_by(sample, Cell.type) %>%
+  summarise(
+    total_cells          = n(),
+    cells_LARRY_detected = sum(!is.na(exp_clone)),
+    pct_detected         = round(100 * cells_LARRY_detected / total_cells, 1),
+    .groups = "drop"
+  )
+
+# Per cell type overall
+dropout_overall <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY", !is.na(Cell.type)) %>%
+  mutate(Cell.type = factor(Cell.type, levels = celltype_order_hh1631)) %>%
+  filter(!is.na(Cell.type)) %>%
+  group_by(Cell.type) %>%
+  summarise(
+    total_cells          = n(),
+    cells_LARRY_detected = sum(!is.na(exp_clone)),
+    pct_detected         = round(100 * cells_LARRY_detected / total_cells, 1),
+    .groups = "drop"
+  )
+
+write.csv(dropout_per_sample, file.path(data, "LARRY_detection_summary_per_sample_HH16HH31.csv"), row.names = FALSE)
+write.csv(dropout_overall,    file.path(data, "LARRY_detection_summary_overall_HH16HH31.csv"),    row.names = FALSE)
+cat("Detection summary CSVs saved\n")
+```
+
+## LARRY detection barplot
+```{r detection-barplot-hh1631}
+# Stacked detected / not_detected, one bar for the whole dataset
+detection_plot_df <- seur_obj@meta.data %>%
+  filter(samples_LARRY == "LARRY") %>%
+  mutate(clone_id_detected = ifelse(!is.na(exp_clone), "detected", "not_detected")) %>%
+  group_by(clone_id_detected) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  mutate(
+    percent_cells     = round(100 * n / sum(n), 1),
+    dataset           = "HH16 → HH31",
+    clone_id_detected = factor(clone_id_detected, levels = c("not_detected", "detected"))
+  ) %>%
+  arrange(clone_id_detected) %>%                      # not_detected first → bottom
+  mutate(y_label = cumsum(percent_cells) - percent_cells / 2)
+
+ggplot(detection_plot_df, aes(x = dataset, y = percent_cells, fill = clone_id_detected)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(
+    aes(label = round(percent_cells, digits = 1), y = y_label),
+    colour = "black", size = 8, hjust = 0.5, vjust = 0.5
+  ) +
+  scale_fill_manual(
+    values = c("not_detected" = "grey90", "detected" = "darkcyan"),
+    labels = c("not_detected" = "Not detected", "detected" = "Detected")
+  ) +
+  labs(title = "LARRY barcode detection") +
+  ylab("% of cells") +
+  theme_classic() +
+  theme(
+    legend.title = element_blank(),
+    axis.title.x = element_blank(),
+    plot.title   = element_text(face = "bold", size = 24, vjust = 0.5, hjust = 0.5),
+    axis.title.y = element_text(face = "bold", size = 18),
+    axis.text    = element_text(size = 14)
+  )
+
+ggsave(filename = "LARRY_detection_barplot.pdf", plot = last_plot(), path = plots,
+       width = 3, height = 12, units = "cm", dpi = 300, bg = "transparent")
+```

@@ -4,11 +4,30 @@ output: html_document
 date: "2025-06-13"
 ---
 
+This notebook generates figures for Figure 4 and Supplementary Figure S5, covering dI4/dI5 neuron identity, clonal sharing, and proportional dynamics across timepoints (HH28, HH31, HH35) in the injHH12-collHH28/31/35 chicken spinal cord LARRY dataset.
+
+**Data required:**
+- `preprocessing_larry_chicken_clusters_newwave.rds` — main integrated Seurat object
+- `dI4_dI5_Propotions.csv` — mouse dI4/dI5 cell counts per embryonic stage (Delile 2019)
+
+**Outputs:**
+- `dI4_dI5_UMAP-dim2-3.png` — UMAP highlighting dI4 and dI5 clusters
+- `pie_dI4-5_neurons.pdf` — pie chart of dI4/dI5 proportion among all neurons
+- `circos_clonal_dI4_dI5.pdf` — circos/chord diagram of clonal co-occurrence between neuronal subtypes
+- `dI4_dI5_ratio_LARRY_median_replicates.pdf` — stacked bar of median dI4/dI5 ratios in LARRY+ cells
+- `dI4_dI5_ONLY_clone_size-NEW-all-other-cells-included.pdf` — clone size distribution for dI4-only vs shared clones
+- `dI4_dI5_KDE_experiments.pdf` — KDE/histogram of dI4 fraction within clones per timepoint
+- `volcano-DEGs-pval.pdf` — volcano plot of DEGs between dI4 shared-with-dI5 vs dI4-only cells
+- `mouse_dI4_dI5_ratio_onlyE11.pdf` — stacked bar of dI4/dI5 ratios in mouse (S5)
+- `KCNIP4_across_exp_vlnplot.pdf` — violin plot of KCNIP4 expression in dI4 cells across timepoints
+
+---
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-#Libraries
+## Libraries
 ```{r init}
 
 library(dplyr)
@@ -24,19 +43,20 @@ library(tibble)
 ```
 
 
-#PATHS
-```{r}
+## Paths
+```{r paths}
+# Set output paths for plots and data
 
-
-plots = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure4/" 
+plots = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure4/"
 
 data = "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/data/"
 
 
 ```
 
-#Read rds
-```{r}
+## Read rds
+```{r load-seurat-object}
+# Load integrated Seurat object and add experiment metadata columns
 seur_obj <- read_rds("/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/data/cleaned_integrated_JD/preprocessing_larry_chicken_clusters_newwave.rds")
 
   # seur_obj <- read_rds("/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/data/cleaned_integrated_JD/Feb2025_SO_subset_new_exp_names.Rds")
@@ -103,8 +123,9 @@ seur_obj <- AddMetaData(seur_obj, metadata = meta_with_clone_status$multi_cell_c
 ```
 
 
-#dI4_dI5 UMAP
-```{r}
+## dI4/dI5 UMAP
+```{r di4-di5-umap}
+# Highlight dI4_dILA and dI5_dILB clusters on UMAP (dims 2–3)
 
 # Define the clusters for each group
 highlight_clusters_1 <- c("dI4_dILA")  # Replace with your actual cluster names
@@ -114,7 +135,7 @@ highlight_clusters_2 <- c("dI5_dILB")  # Replace with your actual cluster names
 seur_obj@meta.data$highlight <- ifelse(seur_obj@meta.data$`Cell.type` %in% highlight_clusters_1, "dI4_dILA",
                                ifelse(seur_obj@meta.data$`Cell.type` %in% highlight_clusters_2, "dI5_dILB", "Other"))
 
-DimPlot(seur_obj, dim = c(2,3), group.by = "highlight", cols = c("dI4_dILA" = "#3F7D83", "dI5_dILB" = "#BA600F", "Other" = "grey"))+ 
+DimPlot(seur_obj, dim = c(2,3), group.by = "highlight", cols = c("dI4_dILA" = "#3F7D83", "dI5_dILB" = "#BA600F", "Other" = "grey"))+
   labs(title = NULL) +
       coord_fixed(ratio = 1) +
       scale_x_discrete(breaks = NULL) +
@@ -127,8 +148,9 @@ ggsave(filename = paste0("dI4_dI5_UMAP-dim2-3", ".png"), plot = last_plot(), pat
 
 ```
 
-#Percentage dI4/di5 over all
-```{r}
+## Percentage dI4/dI5 over all neurons
+```{r di4-di5-pie-proportion}
+# Pie chart showing proportion of dI4/dI5 among all neuronal subtypes
 library(dplyr)
 library(ggplot2)
 
@@ -161,13 +183,15 @@ ggsave(filename = "pie_dI4-5_neurons.pdf", plot = last_plot(), path = plots,
     height = 12, units = "cm",
     dpi = 300, bg = "transparent")
 ```
-#Circos plot dI4-5
-```{r}
+
+## Circos plot dI4/dI5 clonal co-occurrence
+```{r circos-clonal-matrix-build}
+# Build symmetric clonal co-occurrence matrix across neuronal subtypes for chord diagram
 library(tidyverse)
 library(Seurat)
 
 # Define the neuronal types to include
-neurons <- c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6", 
+neurons <- c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6",
              "V0", "V1", "V2a", "V2b", "MN", "V3")
 
 # STEP 2: Subset metadata
@@ -238,7 +262,8 @@ diag(link_matrix) <- 0
 
 ```
 
-```{r}
+```{r circos-plot-render}
+# Render and save circos chord diagram highlighting dI4–dI5 clonal links
 # Create a link color matrix — default grey
 link_col_matrix <- matrix("grey90", nrow = nrow(link_matrix), ncol = ncol(link_matrix),
                           dimnames = dimnames(link_matrix))
@@ -252,7 +277,7 @@ neuron_colors["dI4_dILA"] <- "steelblue"
 neuron_colors["dI5_dILB"] <- "steelblue"
 
 # Custom DV order (dorsal to ventral)
-neuron_order <- c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6", 
+neuron_order <- c("dI1", "dI2", "dI3", "dI4_dILA", "dI5_dILB", "dI6",
                   "V0", "V1", "V2a", "V2b", "MN", "V3")
 
 
@@ -285,8 +310,9 @@ dev.off()
 ```
 
 
-#dI4-5 ratio inverted median replicates
-```{r}
+## dI4/dI5 ratio stacked bar (median per replicate)
+```{r di4-di5-ratio-stacked-bar}
+# Compute per-replicate dI4/dI5 ratios in LARRY+ cells and plot stacked median bars across timepoints
 
 library(dplyr)
 library(ggplot2)
@@ -357,7 +383,7 @@ ggplot(summary_ratios, aes(x = experiment, fill = Cell.type)) +
     position = position_identity()
   ) +
 
-  
+
   # Ratio labels
   geom_text(aes(
     x = experiment,
@@ -405,11 +431,14 @@ ggsave(filename = "dI4_dI5_ratio_LARRY_median_replicates.pdf", plot = last_plot(
 
 ```
 
-#Calculate clone size for dI4only and shared clones
-```{r}
+## Clone size for dI4-only vs shared clones
+
+### Build clone classification table
+```{r di4-di5-clone-classification}
+# Classify multicellular clones as dI4-only, dI5-only, shared dI4+dI5, dpL-only, or Other
 
 # Step 1: Create a new tibble with relevant cell types and information about clones
-#I am now leaving all the cells in there at first and then select later 
+#I am now leaving all the cells in there at first and then select later
 clone_table <- seur_obj@meta.data %>%
   as_tibble(rownames = "cell_id") %>%  # Convert row names (cell IDs) into a "cell_id" column
   # filter(Cell.type %in% c("dI4_dILA", "dI5_dILB", "dpL"), !is.na(exp_clone)) %>% # Filter for specific cell types
@@ -435,7 +464,10 @@ clone_table <- clone_table %>%
   )
 ```
 
-```{r}
+### Clone size boxplot by class
+```{r di4-di5-clone-size-boxplot}
+# Plot clone size distribution for dI4-only vs dI4+dI5 shared clones, faceted by timepoint
+
 #Only dI4 and dI4/dI5 clones
 
 # Step 1: Calculate clone sizes
@@ -445,7 +477,7 @@ clone_sizes <- clone_table %>%
 
 # Step 2: Filter out unwanted classes (dpL_only and dI5_only) and normalize clone sizes
 clone_sizes_filtered2 <- clone_sizes %>%
-  filter(class %in% c("dI4_only", "dI4_dILA|dI5_dILB", "dI5_only")) 
+  filter(class %in% c("dI4_only", "dI4_dILA|dI5_dILB", "dI5_only"))
 # %>%  # Only keep relevant classes
 #   filter(clone_size > 1)
 
@@ -469,9 +501,9 @@ ggplot(clone_sizes_filtered2, aes(x = class, y = clone_size, fill = class)) +
   labs(title = "Average Clone Size",
        x = " ",
        y = "Clone Size (log10)") +
-  scale_fill_manual(values = c("dI4_only" = "#3F7D83", 
+  scale_fill_manual(values = c("dI4_only" = "#3F7D83",
                                 "dI4_dILA|dI5_dILB" = "#6F9140"
-                                )) +  
+                                )) +
   scale_y_log10() +  # Set y-axis to log scale
   scale_x_discrete(limits = c("dI4_only", "dI4_dILA|dI5_dILB")) +  # Order the classes
 facet_wrap(~ experiment, ncol = 3) +  # Use the modified factor levels for correct order
@@ -494,8 +526,9 @@ ggsave(filename = "dI4_dI5_ONLY_clone_size-NEW-all-other-cells-included.pdf", pl
 
 ```
 
-#Distribution dI4-5 in clones
-```{r}
+## Distribution of dI4/dI5 ratio within clones
+```{r di4-di5-ratio-kde}
+# KDE and histogram of the dI4 fraction within clones containing dI4 and/or dI5, per timepoint
 
 library(dplyr)
 library(ggplot2)
@@ -529,13 +562,13 @@ medians <- clone_counts %>%
 
 # Step 2: Plot with KDE and histogram
 ggplot(clone_counts, aes(x = ratio)) +
-  geom_histogram(aes(y = ..density..), 
-                 binwidth = 0.05, 
-                 fill = "lightgray", 
-                 color = "black", 
+  geom_histogram(aes(y = ..density..),
+                 binwidth = 0.05,
+                 fill = "lightgray",
+                 color = "black",
                  alpha = 0.5) +
   geom_density(fill = "cornflowerblue", alpha = 0.4, color = NA) +
-  geom_vline(data = medians, aes(xintercept = med), 
+  geom_vline(data = medians, aes(xintercept = med),
              color = "red", linetype = "dashed", linewidth = 1) +
   facet_wrap(~ experiment, nrow = 1) +
   theme_minimal(base_size = 14) +
@@ -551,8 +584,11 @@ ggsave(filename = "dI4_dI5_KDE_experiments.pdf", plot = last_plot(), path = plot
 
 ```
 
-#Divide dI4 into the ones that share and the ones that don't
-```{r}
+## Divide dI4 by clonal sharing status
+
+### Classify dI4 cells as shared-with-dI5 or dI4-only
+```{r di4-clone-category-assignment}
+# Annotate each dI4_dILA cell as belonging to a clone shared with dI5 or not
 
 # Step 1: Filter for dI4_dILA and dI5_dILB cells, keeping the "experiment" column
 dI4_cells <- seur_obj@meta.data %>%
@@ -571,16 +607,17 @@ shared_clones <- intersect(dI4_cells$exp_clone, dI5_cells$exp_clone)
 # Step 3: Categorize dI4_dILA cells based on shared exp_clone, keeping the experiment column
 dI4_cells_classes <- dI4_cells %>%
   mutate(
-    clone_category = ifelse(exp_clone %in% shared_clones, 
-                            "shared_with_dI5", 
+    clone_category = ifelse(exp_clone %in% shared_clones,
+                            "shared_with_dI5",
                             "dI4_only")
   )
 ```
 
 
+### Add dI4 clone category to Seurat object and subset
+```{r di4-subset-seurat}
+# Add dI4_clone_category metadata column and subset Seurat object to dI4 cells only
 
-##Check for diff gene expr between them
-```{r}
 # Add clone_category information to the Seurat object
 seur_obj@meta.data$dI4_clone_category <- NA  # Create an empty column
 
@@ -592,7 +629,7 @@ seur_obj@meta.data[dI4_cells_classes$cell_id, "dI4_clone_category"] <- dI4_cells
 # Subset the Seurat object to keep only dI4_dILA cells
 seur_obj_dI4 <- subset(seur_obj, cells = dI4_cells$cell_id)
 
-# seur_obj_dI4_HH28 <- subset(seur_obj, 
+# seur_obj_dI4_HH28 <- subset(seur_obj,
 #                              cells = dI4_cells$cell_id[dI4_cells$experiment == "HH28"])
 
 
@@ -612,8 +649,9 @@ seur_obj@meta.data$dI4_clone_category <- factor(
 
 ```
 
-#Calculate DEGs with Seurat
-```{r}
+## Calculate DEGs between shared-with-dI5 and dI4-only cells
+```{r di4-deg-volcano}
+# Run FindMarkers on dI4 subset and plot volcano of shared-with-dI5 vs dI4-only DEGs
 
 
 # 1. Differential expression analysis
@@ -668,9 +706,13 @@ ggsave(filename = "volcano-DEGs-pval.pdf", plot = p, path = plots,
 ```
 
 
-#Fig.S5
-##Mouse dI4/dI5 proporstions
-```{r}
+---
+
+## Fig. S5
+
+### Mouse dI4/dI5 proportions across embryonic stages
+```{r mouse-di4-di5-proportions}
+# Stacked bar chart of dI4/dI5 ratios in mouse spinal cord at E11.5–E13.5 (Delile 2019)
 library(dplyr)
 library(ggplot2)
 library(readr)
@@ -759,8 +801,9 @@ ggsave(filename = "mouse_dI4_dI5_ratio_onlyE11.pdf", plot = last_plot(), path = 
 
 ```
 
-#Gene comparison by experiment
-```{r}
+### Gene expression across timepoints (KCNIP4)
+```{r kcnip4-expression-violin}
+# Violin plot of KCNIP4 expression in dI4_dILA cells across HH28/HH31/HH35
 library(ggpubr)
 
 # Define variables
