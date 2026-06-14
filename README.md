@@ -108,6 +108,7 @@ Run the two conversion notebooks first to generate Seurat objects from the Pytho
 - `Figure1-S1-S2_new.Rmd` — Fig 1, S1, S2: clone QC, marker validation (Gini index / AUC), UMAPs, confinement analyses. Requires `LARRY_detection_summary_per_sample_HH16HH31.csv` produced by `analyses_injHH16-collHH31.Rmd`.
 - `Figure3-S4_new.Rmd` — Fig 3, S4: excitatory/inhibitory labelling, V0 subtype analysis, wave sharing, Renshaw network, temporal transcription factor dotplots
 - `Figure4-S5.Rmd` — Fig 4, S5: scLiTr clone2vec embeddings, fate commitment analysis, SHAP feature importance
+- `Figure5.Rmd` — Fig 5, S8: H9-RFP human stem-cell clonal analysis; dI4/(dI4+dI5) ratio histograms and KDE plots for clones labelled at D14 and D20, analysed at D28. Requires `H9_D14-D28_clonal_counts_fixed.csv` and `H9_D20-D28_clonal_counts_new.csv`.
 - `Figure6-S7-S8-S9_new.Rmd` — Fig 6, S7, S8, S9: dI4/dI5 analysis, differentially expressed genes, modelling, bootstrapping
 
 ### Additional analyses
