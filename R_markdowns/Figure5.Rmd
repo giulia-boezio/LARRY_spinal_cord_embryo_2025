@@ -1,0 +1,143 @@
+---
+title: "Figure 5 — H9 in vitro clone counts"
+output: html_document
+date: "2025-06-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+```{r init}
+library(tidyverse)
+```
+
+# Paths
+```{r paths}
+plots <- "/Users/boeziog/LARRY_local/10X_analyses_local/Seurat/SC22233/New-SO/plots/new_integrated/paper/figure4/"
+```
+
+# D14 — clones labelled at day 14, analysed at day 28
+
+```{r h9-D14}
+
+df <- read_csv("/Users/boeziog/Desktop/H9_D14-D28_clonal_counts_fixed.csv")
+
+long <- df %>%
+  pivot_longer(
+    cols = -c(Experiment, Well),
+    names_to = c("clone", "marker"),
+    names_pattern = "(clone\\d+)_(.*)",
+    values_to = "value"
+  ) %>%
+  pivot_wider(names_from = marker, values_from = value)
+
+clone_counts_D14 <- long %>%
+  mutate(
+    denom = `488-pax2` + `647-lmx1b`,
+    ratio = if_else(denom == 0 | is.na(denom), NA_real_, `488-pax2` / denom)
+  ) %>%
+  filter(!(is.na(denom) | denom == 0)) %>%
+  select(Experiment, Well, clone, `647-lmx1b`, `488-pax2`, ratio)
+
+# Summary counts
+cat("Total clones:", nrow(clone_counts_D14), "\n")
+cat("Total wells:", n_distinct(paste(clone_counts_D14$Experiment, clone_counts_D14$Well)), "\n")
+clone_counts_D14 %>% count(Experiment, name = "clones") %>% print()
+
+# Density + KDE plot
+ggplot(clone_counts_D14, aes(x = ratio)) +
+  geom_histogram(aes(y = ..density..),
+                 binwidth = 0.1,
+                 fill = "lightgray",
+                 color = "black",
+                 alpha = 0.5) +
+  geom_density(fill = "cornflowerblue", alpha = 0.4, color = NA) +
+  theme_minimal(base_size = 14) +
+  coord_cartesian(xlim = c(0, 1)) +
+  labs(
+    x = "Fraction dI4 / (dI4 + dI5) in clones",
+    y = "Density"
+  )
+
+ggsave(filename = "H9-RFP-D14-28-dI4_dI5_density.pdf", plot = last_plot(), path = plots,
+       scale = 1, width = 16, height = 12, units = "cm", dpi = 300, bg = "transparent")
+
+# Count plot
+ggplot(clone_counts_D14, aes(x = ratio)) +
+  geom_histogram(binwidth = 0.1,
+                 fill = "lightgray",
+                 color = "black") +
+  coord_cartesian(xlim = c(0, 1)) +
+  theme_minimal(base_size = 14) +
+  labs(
+    x = "Fraction dI4 / (dI4 + dI5) in clones",
+    y = "Count"
+  )
+
+ggsave(filename = "H9-RFP-D14-28-dI4_dI5_counts.pdf", plot = last_plot(), path = plots,
+       scale = 1, width = 16, height = 12, units = "cm", dpi = 300, bg = "transparent")
+```
+
+# D20 — clones labelled at day 20, analysed at day 28
+
+```{r h9-D20}
+
+df <- read_csv("/Users/boeziog/Desktop/H9_D20-D28_clonal_counts_new.csv")
+
+long <- df %>%
+  pivot_longer(
+    cols = -c(Experiment, Well),
+    names_to = c("clone", "marker"),
+    names_pattern = "(clone\\d+)_(.*)",
+    values_to = "value"
+  ) %>%
+  pivot_wider(names_from = marker, values_from = value)
+
+clone_counts_D20 <- long %>%
+  mutate(
+    denom = `488-pax2` + `647-lmx1b`,
+    ratio = if_else(denom == 0 | is.na(denom), NA_real_, `488-pax2` / denom)
+  ) %>%
+  filter(!(is.na(denom) | denom == 0)) %>%
+  select(Experiment, Well, clone, `647-lmx1b`, `488-pax2`, ratio)
+
+# Summary counts
+cat("Total clones:", nrow(clone_counts_D20), "\n")
+cat("Total wells:", n_distinct(paste(clone_counts_D20$Experiment, clone_counts_D20$Well)), "\n")
+clone_counts_D20 %>% count(Experiment, name = "clones") %>% print()
+
+# Density + KDE plot
+ggplot(clone_counts_D20, aes(x = ratio)) +
+  geom_histogram(aes(y = ..density..),
+                 binwidth = 0.1,
+                 fill = "lightgray",
+                 color = "black",
+                 alpha = 0.5) +
+  geom_density(fill = "cornflowerblue", alpha = 0.4, color = NA) +
+  theme_minimal(base_size = 14) +
+  coord_cartesian(xlim = c(0, 1)) +
+  labs(
+    x = "Fraction dI4 / (dI4 + dI5) in clones",
+    y = "Density"
+  )
+
+ggsave(filename = "H9-RFP-D20-28-dI4_dI5_density.pdf", plot = last_plot(), path = plots,
+       scale = 1, width = 16, height = 12, units = "cm", dpi = 300, bg = "transparent")
+
+# Count plot
+ggplot(clone_counts_D20, aes(x = ratio)) +
+  geom_histogram(binwidth = 0.1,
+                 fill = "lightgray",
+                 color = "black") +
+  coord_cartesian(xlim = c(0, 1)) +
+  theme_minimal(base_size = 14) +
+  labs(
+    x = "Fraction dI4 / (dI4 + dI5) in clones",
+    y = "Count"
+  )
+
+ggsave(filename = "H9-RFP-D20-28-dI4_dI5_counts.pdf", plot = last_plot(), path = plots,
+       scale = 1, width = 16, height = 12, units = "cm", dpi = 300, bg = "transparent")
+```
