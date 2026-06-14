@@ -106,11 +106,11 @@ Run the two conversion notebooks first to generate Seurat objects from the Pytho
 
 ### Figure notebooks
 
-- `Figure1-S1-S2_new.Rmd` — Fig 1, S1, S2: clone QC, marker validation (Gini index / AUC), UMAPs, confinement analyses. Requires `LARRY_detection_summary_per_sample_HH16HH31.csv` produced by `analyses_injHH16-collHH31.Rmd`.
-- `Figure3-S4_new.Rmd` — Fig 3, S6: include V0/V1 subtype analysis, neuronal wave sharing, temporal transcription factor dotplots
-- `Figure4-S5.Rmd` — Fig 4, S7: include dI4/5 proportions, clonal distributions and clonal gene expression
-- `Figure5.Rmd` — Fig 5, S8: H9-RFP human stem-cell clonal analysis; dI4/(dI4+dI5) ratio histograms and KDE plots for clones labelled at D14 and D20, analysed at D28. 
-- `Figure6-S7-S8-S9_new.Rmd` — Fig 6, S9, S10: human LARRY dataset, dI4/dI5 clonal distribution
+- `Figure1-S1-S2_new.Rmd` — Fig 1, S1, S2: clone QC, LARRY detection rates, marker validation (AUC/Gini), UMAPs, DV clone size analyses (scRNA-seq and immunofluorescence), clonal confinement. Requires `LARRY_detection_summary_per_sample_HH16HH31.csv` produced by `analyses_injHH16-collHH31.Rmd`, and `counts_clones_HH28.xlsx`.
+- `Figure3-S6_new.Rmd` — Fig 3, S6: V0/V2 subtype analysis, neuronal wave characterisation and sharing, OPC clonal analysis, Renshaw network, temporal transcription factor dotplots
+- `Figure4-S7.Rmd` — Fig 4, S7: dI4/dI5 identity, clonal co-occurrence, proportional dynamics across timepoints, DEGs, mouse comparison
+- `Figure5-S8.Rmd` — Fig 5, S8: H9-RFP human stem-cell in vitro clonal analysis; dI4/(dI4+dI5) ratio histograms and KDE plots for clones labelled at D14 (145 clones) and D20 (117 clones), analysed at D28. Requires `H9_D14-D28_clonal_counts_fixed.csv` and `H9_D20-D28_clonal_counts_new.csv`.
+- `Figure6-S9-S10.Rmd` — Fig 6, S9, S10: human CS16/CS17 LARRY dataset; dI4/dI5 clonal classification, DEGs, Spearman correlation with Rayon in vivo reference, binomial mixture modelling with bootstrapping
 
 ### Additional analyses
 
