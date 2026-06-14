@@ -708,7 +708,7 @@ ggsave(filename = "volcano-DEGs-pval.pdf", plot = p, path = plots,
 
 ---
 
-## Fig. S5
+## Fig. S7
 
 ### Mouse dI4/dI5 proportions across embryonic stages
 ```{r mouse-di4-di5-proportions}

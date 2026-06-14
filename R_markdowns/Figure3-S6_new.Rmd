@@ -745,11 +745,11 @@ ggsave(filename = paste0("Clones_in_cluster_",cluster, ".png"), plot = last_plot
 
 
 
-## Fig. S4
+## Fig. S6
 
 ---
 
-## Fig. S4B
+## V0 subtype co-occurrence
 ```{r V0-subtype-cooccurrence-bubble}
 # Plots a bubble chart of neuron types co-occurring in clones with V0v or V0D cells (Fig. S4B)
 
@@ -841,8 +841,8 @@ ggsave(
 
 
 
-## Renshaw cells connections Fig. S4A-G
-### Expression S4G
+## Renshaw cells connections 
+### Expression
 ```{r renshaw-expression-tile}
 # Defines and calls a function to plot early/late tTF expression in V1 cells of a selected clone (Fig. S4G)
 
@@ -934,7 +934,7 @@ ggsave(
 ```
 
 
-### Network graph S4A
+### Network graph 
 ```{r renshaw-network-graph}
 # Builds and plots a bipartite network graph of clones containing Renshaw cells (ONECUT1+MAFB double-positive V1; Fig. S4A)
 
@@ -1050,7 +1050,7 @@ ggsave(filename = "Network_graph_Renshaw.pdf", plot = last_plot(), path = plots,
     dpi = 300, bg = "transparent")
 ```
 
-### Dotplots tTFs by experiment and wave Fig. S4C-D
+### Dotplots tTFs by experiment and wave
 ```{r dotplot-tTFs}
 # Plots tTF expression as DotPlots stratified by experiment (Fig. S4C) and by wave (Fig. S4D)
 
