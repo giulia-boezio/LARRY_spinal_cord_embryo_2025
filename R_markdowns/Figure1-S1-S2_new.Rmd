@@ -1877,7 +1877,7 @@ ggsave(
 
 ```
 
-#### Immunofluorescence data
+#### Immunofluorescence data from embryo sections
 ```{r clone-size-dv-if}
 # Read HH28 IF clone count data and plot clone size by D/V identity
 library(readxl)
@@ -1896,6 +1896,11 @@ clone_sizes <- table_df %>%
 # Filter out NA values in 'D or V'
 clone_sizes_filtered <- clone_sizes %>%
   filter(!is.na(`D or V`))
+
+# Summary counts
+cat("Total embryos:", n_distinct(table_df$EMBRYO[!is.na(table_df$EMBRYO)]), "\n")
+cat("Total clones:", n_distinct(clone_sizes_filtered$clone_name_full), "\n")
+clone_sizes_filtered %>% count(`D or V`, name = "clones") %>% print()
 
 max_y <- max(clone_sizes_filtered$size)
 
