@@ -74,7 +74,7 @@ Notebooks are named with a suffix reflecting the dataset they apply to. Steps fo
 4. `Integration_chicken_*.ipynb` OR `Integration_human_data.ipynb`  
    Creates the final integrated h5ad files using scVI and cESFW features; adds LARRY clone assignments and cell-type annotation.  
    INPUT: `preprocessing_larry_*.h5ad`, `selected_cesfw_features_*_data.npy`, `*_LARRY_*_clone_output.csv` (from nf-LARRY, deposited on GEO)  
-   OUTPUT: `larry_*.csv` (metadata), `preprocessing_larry_*_clusters.h5ad` (final annotated object, deposited on GEO), optional CSV for Seurat conversion
+   OUTPUT: `larry_*.csv` (metadata), `preprocessing_larry_*_clusters.h5ad` (final annotated object), optional CSV for Seurat conversion
 
 5. `permutation_analysis_*.ipynb` (uses `permutation.py`)  
    Permutation-based lineage correlation analysis.  
