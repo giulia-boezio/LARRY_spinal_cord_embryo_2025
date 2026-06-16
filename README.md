@@ -1,6 +1,9 @@
 # Hierarchical lineage architecture of human and avian spinal cord revealed by single-cell genomic barcoding
 Scripts for analysis in Boezio et al (2025)
 
+<img width="242" height="169" alt="image" src="https://github.com/user-attachments/assets/f804272b-d132-4833-98dc-52c4e31b8bef" />
+
+
 This repository contains the code, data references, and notebooks used in the analyses for the paper:
 
 Hierarchical lineage architecture of human and avian spinal cord revealed by single-cell genomic barcoding
